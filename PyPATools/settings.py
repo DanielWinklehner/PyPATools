@@ -29,7 +29,8 @@ class SettingsHandler(object):
 
         self._settings = {"DEBUG": False,
                           "DECIMALS": 12,
-                          "TEMP_DIR": "temp"}
+                          "TEMP_DIR": "temp",
+                          "RELATIVISTIC": True}
 
         # Immediately load settings upon creation
         self.load_settings()
