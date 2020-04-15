@@ -364,6 +364,52 @@ class ParticleDistribution(object):
         # e_yyp_full = twiss_gamma_y * np.max(self.y) ** 2.0 + 2.0 * twiss_alpha_y * np.max(self.y) * np.max(
         #     self.yp) + twiss_beta_y * np.max(self.yp) ** 2.0
 
+    @property
+    def v_mean_m_per_s(self):
+
+        if Z_ENERGY:
+            v = self.vz
+        else:
+            v = np.sqrt(np.square(self.vx) + np.square(self.vy) + np.square(self.vz))
+
+        return np.mean(v)
+
+    @property
+    def v_mean_cm_per_s(self):
+        return self.v_mean_m_per_s * 1.0e2
+
+    @property
+    def mean_b_rho(self):
+        """
+        TODO: include non-relativistic case
+        :return:
+        """
+        if Z_ENERGY:
+            pr = self.pz
+        else:
+            pr = np.sqrt(np.square(self.px) + np.square(self.py) + np.square(self.pz))
+
+        return np.mean(pr) * self.species.mass_mev * 1.0e6 / (self.species.q * CLIGHT)
+
+    def set_mean_energy_z_mev(self, energy):
+        """
+        Sets the mean energy of the distribution to the given value in MeV.
+        Currently this only affects the z direction regardless of global variable Z_ENERGY setting.
+
+        TODO: This should be generalized -DW
+
+        :param energy:
+        :return:
+        """
+        m_mev = self.species.mass_mev
+
+        new_pz = np.sqrt(np.sqare(self._em + m_mev) - np.square(m_mev)) / m_mev
+
+        self.pz -= self._pzm
+        self.pz += new_pz
+
+        self.recalculate_all()
+
 
 if __name__ == '__main__':
     pass
