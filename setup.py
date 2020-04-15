@@ -1,5 +1,5 @@
 from distutils.core import setup
-from Cython.Build import cythonize
+# from Cython.Build import cythonize
 import numpy
 
 
@@ -14,7 +14,7 @@ setup(name='PyPATools',
       packages=['PyPATools'],
       package_data={'PyPATools': ['Settings.txt', 'Doc/*', 'Examples/*']},
       include_package_data=True,
-      ext_modules=cythonize("PyPATools/particles.pyx"),
+      # ext_modules=cythonize("PyPATools/particles.pyx"),
       include_dirs=[numpy.get_include()],
       zip_safe=False,
       )

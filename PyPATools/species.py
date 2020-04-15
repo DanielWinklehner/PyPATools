@@ -1,17 +1,11 @@
 from .global_variables import *
-from scipy import constants as const
 
 __author__ = "Daniel Winklehner, Philip Weigel"
 __doc__ = "Simple class to hold and calculate particle data like mass, charge, etc."
 
-# Initialize some global constants
-# amu = const.value("atomic mass constant energy equivalent in MeV")
-# echarge = const.value("elementary charge")
-# emass_mev = const.value("electron mass energy equivalent in MeV")
-# clight = const.value("speed of light in vacuum")
 
 PRESETS = {'proton': {'latex_label': r"$\mathrm{p}^+$",
-                      'mass_mev': const.value('proton mass energy equivalent in MeV'),
+                      'mass_mev': PMASS_MEV,
                       'a': 1.00727647,
                       'z': 1.0,
                       'q': 1.0},
@@ -22,17 +16,17 @@ PRESETS = {'proton': {'latex_label': r"$\mathrm{p}^+$",
                     'q': 1.0},
            'electron': {'latex_label': r"$\mathrm{e}^-$",
                         'mass_mev': EMASS_MEV,
-                        'a': const.value('electron mass energy equivalent in MeV') / AMU_MEV,
+                        'a': EMASS_MEV / AMU_MEV,
                         'z': 0.0,
                         'q': 1.0},
            'H2_1+': {'latex_label': r"$\mathrm{H}_2^+$",
-                     'mass_mev': 1876.634889,
-                     'a': 2.01510,
+                     'mass_mev': 2.01533 * AMU_MEV,
+                     'a': 2.01533,
                      'z': 2.0,
                      'q': 1.0},
            '4He_2+': {'latex_label': r"$^4\mathrm{He}^{2+}$",
-                      'mass_mev': 3727.379378,
-                      'a': 4.0026022,
+                      'mass_mev': 4.001506179127 * AMU_MEV,
+                      'a': 4.001506179127,
                       'z': 2.0,
                       'q': 2.0}}
 
@@ -166,6 +160,10 @@ class IonSpecies(object):
     @property
     def label(self):
         return self._label
+
+    @property
+    def latex_label(self):
+        return self._latex_label
 
     @property
     def name(self):

@@ -4,7 +4,7 @@ from scipy.interpolate import interp1d, interp2d, griddata
 import numpy as np
 import os
 import pickle
-from .filedialog import *
+# from .filedialog import *
 import h5py
 import re
 
@@ -242,10 +242,11 @@ class Field(object):
     def load_field_from_file(self, filename=None, mirror=False, **kwargs):
 
         if filename is None:
-            fd = FileDialog()
-            filename = fd.get_filename("open")
-            if filename is None:
-                return 0
+            return 1
+            # fd = FileDialog()
+            # filename = fd.get_filename("open")
+            # if filename is None:
+            #     return 0
 
         assert os.path.exists(filename)
         print("Loading field from file '{}'".format(os.path.split(filename)[1]))
@@ -806,10 +807,11 @@ class Field(object):
     def save_to_file(self, filename=None, spacing=None, r_min=None, r_max=None):
 
         if filename is None:
-            fd = FileDialog()
-            filename = fd.get_filename("save")
-            if filename is None:
-                return 0
+            return 1
+            # fd = FileDialog()
+            # filename = fd.get_filename("save")
+            # if filename is None:
+            #     return 0
 
         print("Saving field to file '{}'".format(os.path.split(filename)[1]))
 

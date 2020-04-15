@@ -1,5 +1,4 @@
 numpy
 scipy
-cython
-Cython
 matplotlib
+h5py

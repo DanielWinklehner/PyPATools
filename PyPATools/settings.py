@@ -30,7 +30,8 @@ class SettingsHandler(object):
         self._settings = {"DEBUG": False,
                           "DECIMALS": 12,
                           "TEMP_DIR": "temp",
-                          "RELATIVISTIC": True}
+                          "RELATIVISTIC": True,
+                          "Z_ENERGY": False}
 
         # Immediately load settings upon creation
         self.load_settings()

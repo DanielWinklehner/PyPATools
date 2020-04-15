@@ -11,6 +11,7 @@ DEBUG = (settings["DEBUG"] == "True")
 DECIMALS = int(settings["DECIMALS"])
 TEMP_DIR = settings["TEMP_DIR"]
 RELATIVISTIC = (settings["RELATIVISTIC"] == "True")
+Z_ENERGY = (settings["Z_ENERGY"] == "True")  # If true, only the z component is used for beam energy (paraxial approx.)
 USE_MULTIPROC = True  # In case we are not using mpi or only using 1 processor, fall back on multiprocessing
 ON_WINDOWS = "win" in sys.platform.lower()
 ROOT_PATH = os.path.abspath(os.path.dirname(__file__))
@@ -36,6 +37,7 @@ ECHARGE = const.elementary_charge
 EPS0 = const.epsilon_0
 AMU_MEV = const.value("atomic mass constant energy equivalent in MeV")
 EMASS_MEV = const.value("electron mass energy equivalent in MeV")
+PMASS_MEV = const.value('proton mass energy equivalent in MeV')
 
 # --- Define factors to go to SI units --- #
 kV = 1e3
