@@ -403,7 +403,7 @@ class ParticleDistribution(object):
         """
         m_mev = self.species.mass_mev
 
-        new_pz = np.sqrt(np.sqare(self._em + m_mev) - np.square(m_mev)) / m_mev
+        new_pz = np.sqrt(np.square(self._em + m_mev) - np.square(m_mev)) / m_mev
 
         self.pz -= self._pzm
         self.pz += new_pz
