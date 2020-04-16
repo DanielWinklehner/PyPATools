@@ -123,12 +123,12 @@ class ParticlePusher(object):
                  np.ndarray[DTYPE1_t, ndim=1] _bfield,
                  DTYPE1_t _dt):
 
-        cdef np.ndarray[DTYPE1_t, ndim=1] t = 0.5 * self._ion.q_over_m() * _bfield * _dt
+        cdef np.ndarray[DTYPE1_t, ndim=1] t = 0.5 * self._ion.q_over_m * _bfield * _dt
         cdef np.ndarray[DTYPE1_t, ndim=1] s = 2.0 * t / (1.0 + np.linalg.norm(t) ** 2.0)
-        cdef np.ndarray[DTYPE1_t, ndim=1] v_minus = _v + 0.5 * self._ion.q_over_m() * _efield * _dt
+        cdef np.ndarray[DTYPE1_t, ndim=1] v_minus = _v + 0.5 * self._ion.q_over_m * _efield * _dt
         cdef np.ndarray[DTYPE1_t, ndim=1] v_prime = v_minus + np.cross(v_minus, t)
         cdef np.ndarray[DTYPE1_t, ndim=1] v_plus = v_minus + np.cross(v_prime, s)
-        cdef np.ndarray[DTYPE1_t, ndim=1] result = v_plus + 0.5 * self._ion.q_over_m() * _efield * _dt
+        cdef np.ndarray[DTYPE1_t, ndim=1] result = v_plus + 0.5 * self._ion.q_over_m * _efield * _dt
 
         return result
 
@@ -140,7 +140,7 @@ class ParticlePusher(object):
                     np.ndarray[DTYPE1_t, ndim=1] _bfield,
                     DTYPE1_t _dt):
 
-        cdef np.ndarray[DTYPE1_t, ndim=1] result = _v + self._ion.q_over_m() * (_efield + np.cross(_v, _bfield)) * _dt
+        cdef np.ndarray[DTYPE1_t, ndim=1] result = _v + self._ion.q_over_m * (_efield + np.cross(_v, _bfield)) * _dt
 
         return result
 
@@ -158,11 +158,11 @@ class ParticlePusher(object):
                                                                                [-_bfield[2], 0.0, _bfield[0]],
                                                                                [-_bfield[1], -_bfield[0], 0.0]])
 
-        cdef np.ndarray[DTYPE1_t, ndim=1] epsilon = 0.5 * self._ion.q_over_m() * b_norm * _dt
+        cdef np.ndarray[DTYPE1_t, ndim=1] epsilon = 0.5 * self._ion.q_over_m * b_norm * _dt
         cdef np.ndarray[DTYPE1_t, ndim=2] mat_p = np.eye(3) + epsilon * rot_mat
         cdef np.ndarray[DTYPE1_t, ndim=2] mat_m_inv = np.linalg.inv(np.eye(3) - epsilon * rot_mat)
         _v = np.matmul(np.matmul(mat_m_inv, mat_p), _v) + \
-                                               np.matmul(mat_m_inv, _efield) * self._ion.q_over_m() * _dt
+                                               np.matmul(mat_m_inv, _efield) * self._ion.q_over_m * _dt
 
         return _v
 
@@ -180,6 +180,9 @@ class ParticlePusher(object):
         return  _r + _v * _dt, _v
 
 if __name__ == "__main__":
+    pass
+
+    """
     h2p = IonSpecies(name="H2_1+", energy_mev=1.0, label="$\mathrm{H}_2^+$")
     h2p.calculate_from_energy_mev(0.07 / h2p.a())
     print("Cyclotron radius should be {} m".format(h2p.b_rho()))
@@ -213,3 +216,4 @@ if __name__ == "__main__":
     plt.plot(r[:, 0], r[:, 1])
     plt.gca().set_aspect('equal')
     plt.show()
+    """

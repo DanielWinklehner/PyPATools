@@ -206,21 +206,21 @@ class ParticleDistribution(object):
     @property
     def vx(self):
         if RELATIVISTIC:
-            return CLIGHT * np.square(self.px) / (np.square(self.px) + 1.0)
+            return CLIGHT * self.px / np.sqrt(np.square(self.px) + 1.0)
         else:
             return CLIGHT * self.px
 
     @property
     def vy(self):
         if RELATIVISTIC:
-            return CLIGHT * np.square(self.py) / (np.square(self.py) + 1.0)
+            return CLIGHT * self.py / np.sqrt(np.square(self.py) + 1.0)
         else:
             return CLIGHT * self.py
 
     @property
     def vz(self):
         if RELATIVISTIC:
-            return CLIGHT * np.square(self.pz) / (np.square(self.pz) + 1.0)
+            return CLIGHT * self.pz / np.sqrt(np.square(self.pz) + 1.0)
         else:
             return CLIGHT * self.pz
 
@@ -263,13 +263,13 @@ class ParticleDistribution(object):
 
         x_mean, y_mean, z_mean = self.centroid
 
-        xp_mean = np.mean(self.xp)  # (rad)
-        yp_mean = np.mean(self.yp)  # (rad)
-
         # Calculate standard deviations
         self.x_std = np.std(self.x)  # (m)
         self.y_std = np.std(self.y)  # (m)
         self.z_std = np.std(self.z)  # (m)
+
+        xp_mean = np.mean(self.xp)  # (rad)
+        yp_mean = np.mean(self.yp)  # (rad)
 
         self.xp_std = np.std(self.xp)  # (rad)
         self.yp_std = np.std(self.yp)  # (rad)
@@ -401,12 +401,11 @@ class ParticleDistribution(object):
         :param energy:
         :return:
         """
-        m_mev = self.species.mass_mev
-
-        new_pz = np.sqrt(np.square(self._em + m_mev) - np.square(m_mev)) / m_mev
+        gamma = energy / self.species.mass_mev + 1.0
+        beta = np.sqrt(1.0 - gamma**(-2.0))
 
         self.pz -= self._pzm
-        self.pz += new_pz
+        self.pz += gamma * beta
 
         self.recalculate_all()
 
