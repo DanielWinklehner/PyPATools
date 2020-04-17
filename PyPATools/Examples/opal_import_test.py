@@ -60,8 +60,8 @@ def get_data(fn):
     return _pd
 
 
-fn0 = r"D:\Dropbox (MIT)\Projects\IsoDAR\60 MeV Cyclotron\harmonic4\v20200326_1 (5 Collimators)" \
-      r"\Stage1 (102 turns - no ESC)\OPAL run\NNCollim.h5"
+# TODO: Provide small h5 file in Example folder -DW
+fn0 = r"<path to OPAL h5 file>"
 
 print("Importing Data from OPAL h5 file.")
 pd = get_data(fn0)
@@ -92,5 +92,5 @@ plt.show()
 
 print("Calculating relativistically: {} and assuming paraxial: {}".format(RELATIVISTIC, Z_ENERGY))
 print("Mean Energy = {} keV/amu".format(pd.mean_energy_mev_per_amu * 1e3))
-print("Emittances (1-rms, norm.):", pd.get_emittances() * 1e6)
+print("Emittances (1-rms, norm.):", pd.get_emittances() * 1e6, "mm-mrad")
 print("Twiss Parameters:", pd.get_twiss_parameters())
