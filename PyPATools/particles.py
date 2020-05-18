@@ -102,6 +102,7 @@ class ParticleDistribution(object):
                  px=np.zeros(1),
                  py=np.zeros(1),
                  pz=np.zeros(1),
+                 q=np.zeros(1),
                  recalculate=True):
         """
         A class that holds particle distribution data and has a few handy functions
@@ -125,7 +126,8 @@ class ParticleDistribution(object):
         self.px = px  # beta * gamma
         self.py = py  # beta * gamma
         self.pz = pz  # beta * gamma
-
+        self.q = q  # macro-charge in C
+        
         self.numpart = 0
 
         # --- Collective data --- #
@@ -136,7 +138,8 @@ class ParticleDistribution(object):
         self._pxm = 0.0  # beta * gamma
         self._pym = 0.0  # beta * gamma
         self._pzm = 0.0  # beta * gamma
-        self._em = None  # Mean Energy (MeV)
+        self._ekin_mean = None  # Mean Energy (MeV)
+        self._ekin_stdev = None  # RMS energy spread (MeV)
 
         # standard deviations
         self.x_std = 0.0  # (m)
@@ -186,15 +189,21 @@ class ParticleDistribution(object):
 
     @property
     def mean_energy_mev_per_amu(self):
-        if self._em is None:
+        if self._ekin_mean is None:
             self.calculate_mean_energy_mev()
-        return self._em / self.species.a
+        return self._ekin_mean / self.species.a
 
     @property
     def mean_energy_mev(self):
-        if self._em is None:
+        if self._ekin_mean is None:
             self.calculate_mean_energy_mev()
-        return self._em
+        return self._ekin_mean
+
+    @property
+    def rms_energy_spread_mev(self):
+        if self._ekin_mean is None:
+            self.calculate_mean_energy_mev()
+        return self._ekin_stdev
 
     @property
     def mean_momentum_betagamma(self):
@@ -225,6 +234,10 @@ class ParticleDistribution(object):
             return CLIGHT * self.pz
 
     @property
+    def pz_si(self):
+        return self.pz * self._species.mass_kg * CLIGHT
+
+    @property
     def xp(self):
         return self.vx / self.vz
 
@@ -246,7 +259,8 @@ class ParticleDistribution(object):
         self._pym = np.mean(self.py)
         self._pzm = np.mean(self.pz)
 
-    def calculate_mean_energy_mev(self):
+    @property
+    def ekin_mev(self):
         m_mev = self._species.mass_mev
 
         if Z_ENERGY:
@@ -255,9 +269,15 @@ class ParticleDistribution(object):
             pr = np.sqrt(np.square(self.px) + np.square(self.py) + np.square(self.pz))
 
         if RELATIVISTIC:
-            self._em = np.mean(np.sqrt(np.square(pr * m_mev) + np.square(m_mev)) - m_mev)
+            _ekin = np.sqrt(np.square(pr * m_mev) + np.square(m_mev)) - m_mev
         else:
-            self._em = np.mean(m_mev * pr**2.0 / 2.0)
+            _ekin = m_mev * pr**2.0 / 2.0
+            
+        return _ekin
+            
+    def calculate_mean_energy_mev(self):
+        self._ekin_mean = np.mean(self.ekin_mev)
+        self._ekin_stdev = np.std(self.ekin_mev)
 
     def calculate_stdevs(self):
 
