@@ -40,9 +40,9 @@ dependencies:
   - pyparsing=2.4.7
   - pyqt=5.12.3
   - pyqtgraph
-  - python=3.7.3
+  - python=3.8
   - python-dateutil
-  - python_abi=3.7
+  - python_abi=3.8
   - pythonocc-core=7.4.0
   - qt=5.12.5
   - scipy=1.4.1
