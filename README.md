@@ -38,7 +38,15 @@ can be found in /PyPATools/documents.
 simply create a new Anaconda3 environment from the Navigator (Environments-->Import)
 or from the command line
 
-``conda env create -f environment.yml``
+```bash
+conda env create -f environment.yml
+```
+
+or
+
+```bash
+conda env create -f env_ubuntu.yml
+```
 
 The environment name can be changed in the yml file or with the _-name_ flag.
 
