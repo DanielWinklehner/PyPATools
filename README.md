@@ -63,6 +63,45 @@ It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 instal
 install them using:
 
 ``sudo apt-get install libglu1-mesa``
+
+## Installing WARP
+
+Installation of WARP follows largely the instructions on the WARP 
+[webpage](http://warp.lbl.gov/home/how-to-s/installation).
+
+To use the `warp.sh` bash script in the documents directory, the `src`
+directory has to exist in your home folder and both pygist and WARP
+have to be cloned there. 
+
+### pygist
+
+Get pygist by cloning it from the repository
+
+```bash
+cd ~/src
+git clone https://bitbucket.org/dpgrote/pygist
+```
+
+### Downloading WARP
+Get WARP by downloading it from https://bitbucket.org/berkeleylab/warp/downloads/ and extracting 
+it using `tar`:
+
+```bash
+cd ~/src
+wget https://bitbucket.org/berkeleylab/warp/downloads/Warp_Release_4.5.tgz
+tar -xvf Warp_Release_4.5.tgz
+cd warp
+git pull
+```
+
+### Compiling gist and WARP using the shell script
+Cd into the documents directory where warp.sh is located.
+
+```bash
+source warp.sh
+```
+The installation should run automatically for gist, serial WARP and parallel WARP.
+
 ## OpenCL
 For the new bempp-cl it is necessary to have OpenCL drivers installed so that
 pyopencl can access the hardware. There are various devices (CPU's, GPU's FPGA's) 
