@@ -22,6 +22,7 @@ dependencies:
   - pyopengl
   - mpi4py
   - ocl-icd-system
+  - hdbscan
   - pip:
     - meshio==4.0.10
     - Forthon

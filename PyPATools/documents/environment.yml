@@ -53,6 +53,7 @@ dependencies:
   - tornado=6.0.4
   - wheel=0.34.2
   - zlib=1.2.11
+  - hdbscan
   - pip:
     - meshio==4.0.10
     - numpy-quaternion==2019.12.11.22.25.52
