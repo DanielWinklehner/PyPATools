@@ -429,6 +429,37 @@ class ParticleDistribution(object):
 
         self.recalculate_all()
 
+    def load_from_aima(self, x, xp, y, yp, phi, energy, freq, charge=1.0):
+        """
+
+        :param x: particle position in cm
+        :param xp: particle angle in rad
+        :param y: particle position in cm
+        :param yp: particle angle in rad
+        :param phi: particle phase in deg
+        :param energy: particle energy in eV
+        :param freq: bunch frequency in Hz
+        :param charge: bunch charge in C
+        :return:
+        """
+
+        self.x = x * 10.0  # mm
+        self.x = y * 10.0  # mm
+
+        gamma = energy / self.species.mass_mev + 1.0
+        beta = np.sqrt(1.0 - gamma ** (-2.0))
+        beta_lambda = beta / freq * CLIGHT
+
+        self.z = phi * beta_lambda / 360.0 * 1000.0  # mm
+
+        self.pz = gamma * beta
+        self.px = xp * self.pz
+        self.py = yp * self.pz
+
+        self.q = charge
+
+        self.recalculate_all()
+
 
 if __name__ == '__main__':
     pass
