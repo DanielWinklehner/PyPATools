@@ -23,6 +23,7 @@ dependencies:
   - mpi4py
   - ocl-icd-system
   - hdbscan
+  - ffmpeg
   - pip:
     - meshio==4.0.10
     - Forthon
