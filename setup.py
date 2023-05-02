@@ -4,7 +4,7 @@ import numpy
 
 
 setup(name='PyPATools',
-      version='0.0.2',
+      version='0.0.3',
       python_requires='>=3',
       description='Several useful classes for simulating particle accelerators',
       url='https://github.com/DanielWinklehner/PyPATools',
