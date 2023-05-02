@@ -233,6 +233,27 @@ class ParticleDistribution(object):
         else:
             return CLIGHT * self.pz
 
+    def set_p_from_v(self, vx, vy, vz):
+        """
+        Set velocity data and calculate momenta
+        :param vx: velocity component in x direction (m/s)
+        :param vy: velocity component in y direction (m/s)
+        :param vz: velocity component in z direction (m/s)
+        :return:
+        """
+        if RELATIVISTIC:
+            self.px = np.power(CLIGHT ** 2.0 / vx ** 2.0 - 1.0, -0.5)
+            self.py = np.power(CLIGHT ** 2.0 / vy ** 2.0 - 1.0, -0.5)
+            self.pz = np.power(CLIGHT ** 2.0 / vz ** 2.0 - 1.0, -0.5)
+        else:
+            self.px = vx / CLIGHT
+            self.py = vy / CLIGHT
+            self.pz = vz / CLIGHT
+
+        self.recalculate_all()
+
+        return 0
+
     @property
     def pz_si(self):
         return self.pz * self._species.mass_kg * CLIGHT
@@ -421,42 +442,59 @@ class ParticleDistribution(object):
         :param energy:
         :return:
         """
-        gamma = energy / self.species.mass_mev + 1.0
+        ekin_mev = self.ekin_mev - self.mean_energy_mev + energy
+
+        mysign = np.sign(ekin_mev)
+        gamma = np.abs(ekin_mev) / self.species.mass_mev + 1.0
         beta = np.sqrt(1.0 - gamma**(-2.0))
 
-        self.pz -= self._pzm
-        self.pz += gamma * beta
+        self.pz = mysign * beta * gamma
+
+        # self.pz -= self._pzm
+        # self.pz += gamma * beta
 
         self.recalculate_all()
 
     def load_from_aima(self, x, xp, y, yp, phi, energy, freq, charge=1.0):
         """
-
+        Import from AIMA lst file with the following units:
         :param x: particle position in cm
         :param xp: particle angle in rad
         :param y: particle position in cm
         :param yp: particle angle in rad
         :param phi: particle phase in deg
-        :param energy: particle energy in eV
+        :param energy: particle energy in MeV
         :param freq: bunch frequency in Hz
         :param charge: bunch charge in C
         :return:
         """
 
-        self.x = x * 10.0  # mm
-        self.x = y * 10.0  # mm
+        # TODO: include non-relativistic case
+
+        assert len(x) == len(xp) == len(y) == len(yp) == len(phi) == len(energy), \
+            "All input arrays must be of same length!"
+
+        self.x = x * 1.0e-2  # m
+        self.y = y * 1.0e-2  # m
 
         gamma = energy / self.species.mass_mev + 1.0
         beta = np.sqrt(1.0 - gamma ** (-2.0))
         beta_lambda = beta / freq * CLIGHT
 
-        self.z = phi * beta_lambda / 360.0 * 1000.0  # mm
+        self.z = phi * beta_lambda / 360.0  # m
 
         self.pz = gamma * beta
         self.px = xp * self.pz
         self.py = yp * self.pz
 
-        self.q = charge
+        # print(self.x.shape)
+        # print(self.y.shape)
+        # print(self.z.shape)
+        # print(self.px.shape)
+        # print(self.py.shape)
+        # print(self.pz.shape)
+
+        self.q = charge * np.ones(self.x.shape)
 
         self.recalculate_all()
 
