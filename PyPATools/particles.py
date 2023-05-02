@@ -102,7 +102,8 @@ class ParticleDistribution(object):
                  px=np.zeros(1),
                  py=np.zeros(1),
                  pz=np.zeros(1),
-                 q=np.zeros(1),
+                 q=0.0,
+                 f=0.0,
                  recalculate=True):
         """
         A class that holds particle distribution data and has a few handy functions
@@ -115,6 +116,8 @@ class ParticleDistribution(object):
         :param px: numpy array of momentum component in x direction (beta * gamma)
         :param py: numpy array of momentum component in y direction (beta * gamma)
         :param pz: numpy array of momentum component in z direction (beta * gamma)
+        :param q: bunch charge (C)
+        :param f: bunch frequency (Hz)
         :return:
         """
         self._species = species
@@ -126,7 +129,8 @@ class ParticleDistribution(object):
         self.px = px  # beta * gamma
         self.py = py  # beta * gamma
         self.pz = pz  # beta * gamma
-        self.q = q  # macro-charge in C
+        self.q = q  # C
+        self.f = f  # Hz
         
         self.numpart = 0
 
@@ -174,6 +178,26 @@ class ParticleDistribution(object):
         self.pz = np.random.random_sample(size=size)
 
         self.recalculate_all()
+
+    @property
+    def current(self):
+        return self.q * self.f
+
+    @property
+    def bunch_charge(self):
+        return self.q
+
+    @property
+    def bunch_freq(self):
+        return self.f
+
+    @bunch_charge.setter
+    def bunch_charge(self, q):
+        self.q = q
+
+    @bunch_freq.setter
+    def bunch_freq(self, f):
+        self.f = f
 
     @property
     def species(self):
