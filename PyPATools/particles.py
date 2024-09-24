@@ -285,14 +285,14 @@ class ParticleDistribution(object):
     @property
     def xp(self):
         vz = np.ones(self.vz.shape) * EPSILON
-        idx np.where(self.vz > 1e-10)
+        idx = np.where(self.vz > 1e-10)
         vz[idx] = self.vz[idx]
         return self.vx / vz
 
     @property
     def yp(self):
         vz = np.ones(self.vz.shape) * EPSILON
-        idx np.where(self.vz > 1e-10)
+        idx = np.where(self.vz > 1e-10)
         vz[idx] = self.vz[idx]
         return self.vy / vz
 
