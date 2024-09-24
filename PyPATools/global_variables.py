@@ -30,6 +30,7 @@ os.mkdir(TEMP_DIR)
 
 # Other variables
 COLORS = MyColors()
+EPSILON = 1e-10  # A very small number
 
 # --- Set global constants from scipy --- #
 CLIGHT = const.speed_of_light
