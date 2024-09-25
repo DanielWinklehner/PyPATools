@@ -115,15 +115,17 @@ source warp.sh
 The installation should run automatically for gist, serial WARP and parallel WARP.
 
 ## OpenCL
+_Update: as of 2024, it seems that opencl drivers are packaged with the conda installation of pyopencl._
+
 For the new bempp-cl it is necessary to have OpenCL drivers installed so that
 pyopencl can access the hardware. There are various devices (CPU's, GPU's FPGA's) 
-that support OpenCL and it is somewhat up to the user which drivers they install and
+that support OpenCL, and it is somewhat up to the user which drivers they install and
 which devices they want to use. 
 
 More on the bempp-cl [github page](https://github.com/bempp/bempp-cl)
 
 ### OpenCL on Windows with Intel processor
-This is my setup (DW), so i downloaded the Intel OpenCL drivers from here:
+This is my setup (DW), so I downloaded the Intel OpenCL drivers from here:
 
 https://software.intel.com/en-us/articles/opencl-drivers#cpu-section
 
@@ -142,5 +144,5 @@ I update the graphics driver.
 TODO
 
 ### OpenCL on WSL
-Apparently, there is no support for this. i would be happy to learn differently. 
-Shoot me an message on github if you know more! -DW
+Apparently, there is no support for this. I would be happy to learn differently. 
+Shoot me a message on GitHub if you know more! -DW
