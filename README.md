@@ -32,14 +32,14 @@ up in the same way, but lives in the py_electrodes/ subdirectory_
 
 With the new version of OpenCascade (OCC) and 
 [pythonocc-core](https://github.com/tpaviot/pythonocc-core) (7.4.0), a simple 
-anaconda installation from yml file is possible. The file _environment.yml_ 
+anaconda installation from yml file is possible. The file _environment_new.yml_ 
 can be found in /PyPATools/documents. 
 
 simply create a new Anaconda3 environment from the Navigator (Environments-->Import)
 or from the command line
 
 ```bash
-conda env create -f environment.yml
+conda env create -f environment_new.yml
 ```
 
 or
@@ -48,7 +48,11 @@ or
 conda env create -f env_ubuntu.yml
 ```
 
-The environment name can be changed in the yml file or with the _-name_ flag.
+The environment name can be changed in the yml file or with the _--name_ flag.
+
+_Note: There are segfaults with bempp-cl in Ubuntu at the moment. A note on the
+bempp webpage hints at pocl being the culprit. Some other issues with dependencies
+are also present on Ubuntu. We are looking into these._
 
 _Note: At the moment, this yml file installs EVERYTHING, including 
 several dependencies for the other
