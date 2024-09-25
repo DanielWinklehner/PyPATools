@@ -284,11 +284,17 @@ class ParticleDistribution(object):
 
     @property
     def xp(self):
-        return self.vx / self.vz
+        vz = np.ones(self.vz.shape) * EPSILON
+        idx = np.where(self.vz > 1e-10)
+        vz[idx] = self.vz[idx]
+        return self.vx / vz
 
     @property
     def yp(self):
-        return self.vy / self.vz
+        vz = np.ones(self.vz.shape) * EPSILON
+        idx = np.where(self.vz > 1e-10)
+        vz[idx] = self.vz[idx]
+        return self.vy / vz
 
     @property
     def centroid(self):
