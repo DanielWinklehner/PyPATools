@@ -1,0 +1,73 @@
+name: pyPATools
+channels:
+  - conda-forge
+  - anaconda-fusion
+  - defaults
+dependencies:
+  - blas
+  - ca-certificates
+  - certifi
+  - cycler
+  - cython
+  - fontconfig
+  - freetype
+  - git
+  - gmsh
+  - h5py
+  - icu
+  - importlib-metadata
+  - intel-openmp
+  - jpeg
+  - kiwisolver
+  - libblas
+  - libcblas
+  - libclang
+  - libiconv
+  - liblapack
+  - libpng
+  - libxml2
+  - llvmlite
+  - matplotlib
+  - matplotlib-base
+  - mkl
+  - mkl-service
+  - mpi4py
+  - numba
+  - numpy
+  - occt
+  - openssl
+  - pip
+  - plotly
+  - pyopencl
+  - pyopengl
+  - pyparsing
+  - pyqt
+  - pyqtgraph
+  - pytest
+  - python
+  - python-dateutil
+  - python_abi
+  - pythonocc-core
+  - qt
+  - scipy<1.14
+  - setuptools
+  - six
+  - sqlite
+  - tbb
+  - tornado
+  - vtk
+  - wheel
+  - zlib
+  - hdbscan
+  - ffmpeg
+  - meshio
+  - pip:
+  #  - meshio
+    - numpy-quaternion
+  #  - pyqt5-sip
+  #  - pyqtwebengine
+  #  - qdarkstyle
+    - git+https://github.com/DanielWinklehner/py_electrodes.git
+  #  - git+https://github.com/DanielWinklehner/dans_pymodules.git
+    - git+https://github.com/DanielWinklehner/PyPATools.git
+    - git+https://github.com/bempp/bempp-cl.git

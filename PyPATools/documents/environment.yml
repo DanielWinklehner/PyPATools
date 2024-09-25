@@ -8,9 +8,10 @@ dependencies:
   - ca-certificates=2020.4.5.1
   - certifi=2020.4.5.1
   - cycler=0.10.0
-  - cython=0.29.16
+  - cython
   - fontconfig=2.13.1
   - freetype=2.10.1
+  - git
   - h5py
   - icu=64.2
   - importlib-metadata
@@ -33,20 +34,20 @@ dependencies:
   - numpy=1.18.1
   - occt=7.4.0
   - openssl=1.1.1f
-  - pip=20.0.2
+  - pip
   - plotly
   - pyopencl=2019.1.2
   - pyopengl
   - pyparsing=2.4.7
   - pyqt=5.12.3
   - pyqtgraph
-  - python=3.8
+  - python
   - python-dateutil
-  - python_abi=3.8
+  - python_abi
   - pythonocc-core=7.4.0
   - qt=5.12.5
   - scipy=1.4.1
-  - setuptools=46.1.3
+  - setuptools
   - six=1.14.0
   - sqlite=3.30.1
   - tbb=2020.1
@@ -55,13 +56,14 @@ dependencies:
   - zlib=1.2.11
   - hdbscan
   - ffmpeg
-  - pip:
-    - meshio==4.0.10
-    - numpy-quaternion==2019.12.11.22.25.52
-    - pyqt5-sip==4.19.18
-    - pyqtwebengine==5.12.1
-    - qdarkstyle==2.6.8
-    - git+https://github.com/DanielWinklehner/py_electrodes.git
-    - git+https://github.com/DanielWinklehner/dans_pymodules.git
-    - git+https://github.com/DanielWinklehner/PyPATools.git
-    - git+https://github.com/bempp/bempp-cl.git
+  - meshio
+  #- pip:
+  #  - meshio
+  #  - numpy-quaternion
+  #  - pyqt5-sip
+  #  - pyqtwebengine
+  #  - qdarkstyle
+  #  - git+https://github.com/DanielWinklehner/py_electrodes.git
+  #  - git+https://github.com/DanielWinklehner/dans_pymodules.git
+  #  - git+https://github.com/DanielWinklehner/PyPATools.git
+  #  - git+https://github.com/bempp/bempp-cl.git
