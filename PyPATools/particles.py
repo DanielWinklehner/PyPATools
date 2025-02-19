@@ -9,91 +9,6 @@ __doc__ = "A class that holds particle distribution data and has a few handy fun
           "to calculate emittance and Twiss parameters"
 
 
-# spec = [
-#     ('x', float64[:]),
-#     ('y', float64[:]),
-#     ('z', float64[:]),
-#     ('px', float64[:]),
-#     ('py', float64[:]),
-#     ('pz', float64[:]),
-#     ('_xm', float64),
-#     ('_ym', float64),
-#     ('_zm', float64),
-#     ('_pxm', float64),
-#     ('_pym', float64),
-#     ('_pzm', float64),
-#     ('numpart', int32)
-# ]
-#
-#
-# @jitclass(spec)
-# class ParticleDistributionJIT(object):
-#     def __init__(self,
-#                  x=np.zeros(1, dtype=np.float64),
-#                  y=np.zeros(1, dtype=np.float64),
-#                  z=np.zeros(1, dtype=np.float64),
-#                  px=np.zeros(1, dtype=np.float64),
-#                  py=np.zeros(1, dtype=np.float64),
-#                  pz=np.zeros(1, dtype=np.float64),
-#                  recalculate=True):
-#         """
-#         A class that holds particle distribution data and has a few handy functions
-#         to calculate emittance and Twiss parameters.
-#
-#         :param x: numpy array of x coordinates (m)
-#         :param y: numpy array of y coordinates (m)
-#         :param z: numpy array of z coordinates (m)
-#         :param px: numpy array of momentum component in x direction (beta * gamma)
-#         :param py: numpy array of momentum component in y direction (beta * gamma)
-#         :param pz: numpy array of momentum component in z direction (beta * gamma)
-#         :return:
-#         """
-#
-#         # Raw particle data
-#         self.x = x  # m
-#         self.y = y  # m
-#         self.z = z  # m
-#         self.px = px  # beta * gamma
-#         self.py = py  # beta * gamma
-#         self.pz = pz  # beta * gamma
-#
-#         self.numpart = 0
-#
-#         # Collective data
-#         self._xm = 0.0  # m
-#         self._ym = 0.0  # m
-#         self._zm = 0.0  # m
-#         self._pxm = 0.0  # beta * gamma
-#         self._pym = 0.0  # beta * gamma
-#         self._pzm = 0.0  # beta * gamma
-#
-#         if recalculate:
-#             self.recalculate()
-#
-#     def recalculate(self):
-#         self.numpart = len(self.x)
-#         self.calculate_means()
-#
-#     def generate_random_sample(self, size):
-#
-#         self.x = np.random.random_sample(size=size)
-#         self.y = np.random.random_sample(size=size)
-#         self.z = np.random.random_sample(size=size)
-#         self.px = np.random.random_sample(size=size)
-#         self.py = np.random.random_sample(size=size)
-#         self.pz = np.random.random_sample(size=size)
-#
-#         self.recalculate()
-#
-#     def calculate_means(self):
-#         self._xm = np.mean(self.x)
-#         self._ym = np.mean(self.y)
-#         self._zm = np.mean(self.z)
-#         self._pxm = np.mean(self.px)
-#         self._pym = np.mean(self.py)
-#         self._pzm = np.mean(self.pz)
-
-
 class ParticleDistribution(object):
     def __init__(self, species=IonSpecies('proton'),
                  x=np.zeros(1),
@@ -266,9 +181,9 @@ class ParticleDistribution(object):
         :return:
         """
         if RELATIVISTIC:
-            self.px = np.power(CLIGHT ** 2.0 / vx ** 2.0 - 1.0, -0.5)
-            self.py = np.power(CLIGHT ** 2.0 / vy ** 2.0 - 1.0, -0.5)
-            self.pz = np.power(CLIGHT ** 2.0 / vz ** 2.0 - 1.0, -0.5)
+            self.px = vx / np.sqrt(np.square(CLIGHT) - np.square(vx))
+            self.py = vy / np.sqrt(np.square(CLIGHT) - np.square(vy))
+            self.pz = vz / np.sqrt(np.square(CLIGHT) - np.square(vz))
         else:
             self.px = vx / CLIGHT
             self.py = vy / CLIGHT
