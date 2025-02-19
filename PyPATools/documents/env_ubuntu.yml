@@ -26,6 +26,7 @@ dependencies:
   - hdbscan
   - ffmpeg
   - meshio
+  - gfortran
   - pip:
     - Forthon
     - numpy-quaternion
