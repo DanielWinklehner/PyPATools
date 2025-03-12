@@ -503,7 +503,7 @@ class Field(object):
              "Z": len(np.unique(_data[2]))}
 
         for key, item in data.items():
-            if item["unit"] == "mm":
+            if item["unit"] in ["mm", "cm", "m"]:
                 item["data"] = np.unique(_data[item["column"]])
 
             else:
