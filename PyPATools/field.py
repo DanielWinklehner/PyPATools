@@ -443,9 +443,9 @@ class Field(object):
 
         self._dim = 3
 
-        label_map = {"mir1x": "X",
-                     "mir1y": "Y",
-                     "mir1z": "Z",
+        label_map = {"x": "X",
+                     "y": "Y",
+                     "z": "Z",
                      "mf.Bx": "BX",
                      "mf.By": "BY",
                      "mf.Bz": "BZ"}
@@ -473,7 +473,9 @@ class Field(object):
                     j = 0
                     for label in sline:
                         if label not in ["%", "(T)"]:
-                            nlabel = label_map[label]
+                          # Remove any numbers and the prefixes mir and sec to account for derived variable names in COMSOL
+                          label = re.sub('mir', '', re.sub('sec', '', re.sub(r'\d+', '', label)))  
+                          nlabel = label_map[label]
                             data[nlabel] = {"column": j}
                             if nlabel in ["X", "Y", "Z"]:
                                 data[nlabel]["unit"] = l_unit
