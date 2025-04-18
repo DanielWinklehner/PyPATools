@@ -928,6 +928,63 @@ class Field(object):
 
         return self._scaling
 
+    def plot_field_slice(self, direction='z', crossing=0.0, spacing=None, r_min=None, r_max=None):
+
+        assert self._dim == 3, "Plotting field slice only implemented for 3D fields at the moment!"
+
+        if r_min is None:
+            r_min = [self._field["x"].grid[0][0], self._field["x"].grid[1][0], self._field["x"].grid[2][0]]
+        if r_max is None:
+            r_max = [self._field["x"].grid[0][-1], self._field["x"].grid[1][-1], self._field["x"].grid[2][-1]]
+        if spacing is None:
+            spacing = self._field["x"].grid[0][1] - self._field["x"].grid[0][0]
+
+        r_min[dim_numbers[direction]] = crossing
+        r_max[dim_numbers[direction]] = crossing
+
+        nr = np.array((r_max - r_min) / spacing + 1, int)
+
+        x_mesh, y_mesh, z_mesh = np.meshgrid(np.linspace(r_min[0], r_max[0], nr[0]),
+                                             np.linspace(r_min[1], r_max[1], nr[1]),
+                                             np.linspace(r_min[2], r_max[2], nr[2]),
+                                             indexing='ij', sparse=False)
+
+        _bx = self._scaling * self._field["x"]((x_mesh, y_mesh, z_mesh)).squeeze()
+        _by = self._scaling * self._field["y"]((x_mesh, y_mesh, z_mesh)).squeeze()
+        _bz = self._scaling * self._field["z"]((x_mesh, y_mesh, z_mesh)).squeeze()
+
+        mesh = [x_mesh.squeeze(), y_mesh.squeeze(), z_mesh.squeeze()]
+        mesh.pop(dim_numbers[direction])
+        dim_labels = ["x (m)", "y (m)", "z (m)"]
+        dim_labels.pop(dim_numbers[direction])
+
+        print("Plotting Field at {} = {}...".format(direction, crossing))
+
+        plt.subplot(131)
+        plt.imshow(_bx, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
+        plt.colorbar()
+        plt.title('Bx in {} = {} plane'.format(direction, crossing))
+        plt.xlabel(dim_labels[0])
+        plt.ylabel(dim_labels[1])
+
+        plt.subplot(132)
+        plt.imshow(_by, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
+        plt.colorbar()
+        plt.title('By in {} = {} plane'.format(direction, crossing))
+        plt.xlabel(dim_labels[0])
+        plt.ylabel(dim_labels[1])
+
+        plt.subplot(133)
+        plt.imshow(_bz, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
+        plt.colorbar()
+        plt.title('Bz in {} = {} plane'.format(direction, crossing))
+        plt.xlabel(dim_labels[0])
+        plt.ylabel(dim_labels[1])
+
+        plt.show()
+
+        return 0
+
 
 # Set up some tests
 if __name__ == "__main__":
