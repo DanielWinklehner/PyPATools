@@ -7,6 +7,7 @@ import pickle
 # from .filedialog import *
 import h5py
 import re
+import matplotlib.pyplot as plt
 
 __author__ = "Daniel Winklehner"
 __doc__ = """Class to load field data save as interpolation functions to get field data at point"""
