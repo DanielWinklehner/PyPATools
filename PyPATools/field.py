@@ -933,9 +933,9 @@ class Field(object):
         assert self._dim == 3, "Plotting field slice only implemented for 3D fields at the moment!"
 
         if r_min is None:
-            r_min = [self._field["x"].grid[0][0], self._field["x"].grid[1][0], self._field["x"].grid[2][0]]
+            r_min = np.array([self._field["x"].grid[0][0], self._field["x"].grid[1][0], self._field["x"].grid[2][0]])
         if r_max is None:
-            r_max = [self._field["x"].grid[0][-1], self._field["x"].grid[1][-1], self._field["x"].grid[2][-1]]
+            r_max = np.array([self._field["x"].grid[0][-1], self._field["x"].grid[1][-1], self._field["x"].grid[2][-1]])
         if spacing is None:
             spacing = self._field["x"].grid[0][1] - self._field["x"].grid[0][0]
 
