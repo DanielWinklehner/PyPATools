@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup, find_packages
 from Cython.Build import cythonize
 import numpy
 
@@ -11,8 +11,9 @@ setup(name='PyPATools',
       author='Daniel Winklehner',
       author_email='winklehn@mit.edu',
       license='MIT',
-      packages=['PyPATools'],
-      package_data={'PyPATools': ['Settings.txt', 'Doc/*', 'Examples/*']},
+      # packages=['PyPATools'],
+      packages=find_packages(),
+      package_data={'PyPATools': ['Settings.txt', 'Doc/', 'Examples/']},
       include_package_data=True,
       ext_modules=cythonize("PyPATools/pusher.pyx"),
       include_dirs=[numpy.get_include()],

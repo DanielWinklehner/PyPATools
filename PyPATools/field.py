@@ -913,6 +913,7 @@ class Field(object):
         h_field.attrs.__setitem__("__Spacing__", spacing)
         h_field.attrs.__setitem__("__Origin__", r_min)
 
+        print("\nBfield Shape:")
         print(_data["hx"].shape)
 
         # Close the file
@@ -962,21 +963,21 @@ class Field(object):
         print("Plotting Field at {} = {}...".format(direction, crossing))
 
         plt.subplot(131)
-        plt.imshow(_bx, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
+        plt.imshow(_bx.T, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
         plt.colorbar()
         plt.title('Bx in {} = {} plane'.format(direction, crossing))
         plt.xlabel(dim_labels[0])
         plt.ylabel(dim_labels[1])
 
         plt.subplot(132)
-        plt.imshow(_by, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
+        plt.imshow(_by.T, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
         plt.colorbar()
         plt.title('By in {} = {} plane'.format(direction, crossing))
         plt.xlabel(dim_labels[0])
         plt.ylabel(dim_labels[1])
 
         plt.subplot(133)
-        plt.imshow(_bz, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
+        plt.imshow(_bz.T, extent=(mesh[0].min(), mesh[0].max(), mesh[1].min(), mesh[1].max()), origin='lower')
         plt.colorbar()
         plt.title('Bz in {} = {} plane'.format(direction, crossing))
         plt.xlabel(dim_labels[0])
