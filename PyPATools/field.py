@@ -472,10 +472,13 @@ class Field(object):
                     if "(T)" in sline:
                         b_unit = "T"
                     j = 0
+
+                    sline = sline[:4] + re.split(r'\([a-zA-z]+\)', ''.join(sline[4:]))
+                  
                     for label in sline:
                         if label not in ["%", "(T)"]:
                             # Remove any numbers and the prefixes mir and sec to account for derived variable names in COMSOL
-                            label = re.sub('mir', '', re.sub('sec', '', re.sub(r'\d+', '', label)))  
+                            label = re.sub('side', '', re.sub('mir', '', re.sub('sec', '', re.sub(r'\d+', '', label))))
                             nlabel = label_map[label]
                             data[nlabel] = {"column": j}
                             if nlabel in ["X", "Y", "Z"]:
