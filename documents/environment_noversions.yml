@@ -44,12 +44,12 @@ dependencies:
   - pyqt
   - pyqtgraph
   - pytest
-  - python
+  - python>=3
   - python-dateutil
   - python_abi
   - pythonocc-core
   - qt
-  - scipy<1.14
+  - scipy
   - setuptools
   - six
   - sqlite
@@ -61,6 +61,7 @@ dependencies:
   - hdbscan
   - ffmpeg
   - meshio
+  - openpmd-api
   - pip:
   #  - meshio
     - numpy-quaternion

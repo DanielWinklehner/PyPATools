@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-from Cython.Build import cythonize
+# from Cython.Build import cythonize
 import numpy
 
 
@@ -13,9 +13,9 @@ setup(name='PyPATools',
       license='MIT',
       # packages=['PyPATools'],
       packages=find_packages(),
-      package_data={'PyPATools': ['Settings.txt', 'Doc/', 'Examples/']},
+      package_data={'PyPATools': ['Settings.txt', 'documents/', 'examples/']},
       include_package_data=True,
-      ext_modules=cythonize("PyPATools/pusher.pyx"),
+      # ext_modules=cythonize("PyPATools/pusher.pyx"),
       include_dirs=[numpy.get_include()],
       zip_safe=False,
       )
