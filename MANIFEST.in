@@ -1,3 +1,0 @@
-include Settings.txt
-recursive-include Doc *
-recursive-include Examples *
