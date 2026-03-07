@@ -37,10 +37,8 @@ CLIGHT = const.speed_of_light
 ECHARGE = const.elementary_charge
 EPS0 = const.epsilon_0
 AMU_MEV = const.value("atomic mass constant energy equivalent in MeV")
-AMU_KG = const.value("atomic mass constant")  # kg
 EMASS_MEV = const.value("electron mass energy equivalent in MeV")
 PMASS_MEV = const.value('proton mass energy equivalent in MeV')
-MUMASS_MEV = const.value("muon mass energy equivalent in MeV")
 
 # --- Define factors to go to SI units --- #
 kV = 1e3
