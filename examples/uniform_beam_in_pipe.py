@@ -172,7 +172,7 @@ def solve_space_charge_field(particles, charges, electrode_assembly):
     # Domain: ±0.25 m in z, ±0.065 m in x and y
     config = PyAMGSolverConfig(
         domain_extent=(0.13, 0.13, 0.5),  # (Lx, Ly, Lz) in meters
-        mesh_cells=(64, 64, 128),  # Resolution
+        mesh_cells=(64, 64, 256),  # Resolution
         amg_strength=0.25,
         solver_tol=1e-6,
         use_gpu=True,
@@ -306,7 +306,7 @@ def plot_potential_slices(phi_3d, solver, output_dir=None):
     cbar = plt.colorbar(contour, ax=ax, label='Potential (V)')
 
     # Add rectangle to show beam outline
-    beam_rect = plt.Rectangle((-2.5, -15), 5, 30, fill=False, edgecolor='cyan',
+    beam_rect = plt.Rectangle((-25, -150), 50, 300, fill=False, edgecolor='cyan',
                               linewidth=2, linestyle='--', label='Beam boundary')
     ax.add_patch(beam_rect)
 
@@ -337,11 +337,11 @@ def main():
         n_particles=100000,
         length=0.3,  # m
         radius=0.025,  # m
-        total_charge=10e-12,  # 10 pC
+        total_charge=500e-12,  # 500 pC
     )
 
     # Step 2: Load conductor
-    electrode_assembly = create_electrode_assembly(filename=r"D:\Dropbox (Personal)\Code\Python\PyPATools\examples\beam_pipe.brep")
+    electrode_assembly = create_electrode_assembly(filename=r"beam_pipe.brep")
 
     # Step 3: Solve
     phi_3d, E_field, solver = solve_space_charge_field(
