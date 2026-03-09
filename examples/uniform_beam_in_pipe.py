@@ -37,7 +37,7 @@ from py_electrodes.py_electrodes import PyElectrode, PyElectrodeAssembly
 # ============================================================================
 
 def create_uniform_cylindrical_beam(n_particles=100000, length=0.3, radius=0.025,
-                                    total_charge=10e-12):
+                                    total_charge=500e-12):
     """
     Create uniform cylindrical particle beam.
 
@@ -124,7 +124,7 @@ def create_electrode_assembly(filename="beam_pipe.brep"):
     # Create PyElectrode from BREP
     electrode = PyElectrode(name="Beam Pipe",
                             voltage=0)
-    electrode.brep_h = 0.01
+    electrode.brep_h = 0.005
     electrode.generate_from_file(filename)
 
     print(f"Electrode loaded: {electrode.name}")
@@ -133,7 +133,7 @@ def create_electrode_assembly(filename="beam_pipe.brep"):
     # Create assembly
     assembly = PyElectrodeAssembly()
     assembly.add_electrode(electrode)
-    assembly.show(show_screen=True)
+    # assembly.show(show_screen=True)
 
     print(f"Assembly contains {len(assembly.electrodes)} electrode(s)")
 
@@ -181,8 +181,7 @@ def solve_space_charge_field(particles, charges, electrode_assembly):
     solver = PyAMGPoissonSolver(config,
                                 electrode_assembly=electrode_assembly)
 
-    solver.debug_visualize_cell_classification()
-    exit()
+    # solver.debug_visualize_cell_classification()
 
     print(f"\n{'=' * 70}")
     print(f"Solving Poisson Equation")
@@ -281,8 +280,8 @@ def plot_potential_slices(phi_3d, solver, output_dir=None):
     cbar = plt.colorbar(contour, ax=ax, label='Potential (V)')
 
     # Add circle to show beam outline
-    circle = plt.Circle((0, 0), 2.5, fill=False, edgecolor='red', linewidth=2,
-                        linestyle='--', label='Beam boundary (2.5 cm radius)')
+    circle = plt.Circle((0, 0), 25, fill=False, edgecolor='red', linewidth=2,
+                        linestyle='--', label='Beam boundary (25 mm radius)')
     ax.add_patch(circle)
 
     ax.set_xlabel('x (mm)', fontsize=12)

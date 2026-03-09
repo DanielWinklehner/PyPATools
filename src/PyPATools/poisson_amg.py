@@ -36,6 +36,7 @@ from enum import IntEnum
 import numba as nb
 from .particles import ParticleDistribution
 from py_electrodes.py_electrodes import PyElectrodeAssembly
+from .global_variables import EPS0
 
 try:
     import cupy as cp
@@ -209,10 +210,10 @@ class PyAMGPoissonSolver:
         self._build_amg_hierarchy()
         print(f"[OK] Built AMG hierarchy ({time.time() - t0:.2f}s)")
 
-        # if self.use_gpu:
-        #     t0 = time.time()
-        #     self._transfer_matrix_to_gpu()
-        #     print(f"[OK] Transferred matrix to GPU ({time.time() - t0:.2f}s)")
+        if self.use_gpu:
+            t0 = time.time()
+            self._transfer_matrix_to_gpu()
+            print(f"[OK] Transferred matrix to GPU ({time.time() - t0:.2f}s)")
 
         self.turn_count = 0
         self.solve_times = []
@@ -239,74 +240,51 @@ class PyAMGPoissonSolver:
 
     def _classify_cells(self):
         """
-        Classify cells as CONDUCTOR, BOUNDARY, or INTERIOR.
+        Classify cells as CONDUCTOR, BOUNDARY, or INTERIOR using vectorized arrays.
         Saves precise distances to boundaries for Shortley-Weller matrix assembly.
         """
-        self.cell_type = np.full(self.n_dofs, CellType.INTERIOR, dtype=np.int32)
-
-        # Store exact distances to boundary: [x+, x-, y+, y-, z+, z-]
-        self.boundary_distances = np.full((self.n_dofs, 6), np.inf, dtype=np.float64)
-
         print("  Querying electrode assembly for surface intersections...")
+
         try:
-            intersections = self.electrodes.compute_axis_aligned_surface_intersections(
+            # Now returns flat arrays of shape (N, 6)
+            min_distances, hit_counts = self.electrodes.compute_axis_aligned_surface_intersections(
                 self.mesh_nodes, axes='all', use_gpu=self.use_gpu)
             print("  Done!")
         except Exception as e:
             print(f"Error: {e}")
             raise
 
-        print("  Intersections calculated. Now classifying cells...")
+        print("  Classifying cells (Vectorized)...")
 
-        # Predefine sizes and keys to avoid recreating them in the loop
-        mesh_sizes = [self.hx, self.hx, self.hy, self.hy, self.hz, self.hz]
-        directions = ['x+', 'x-', 'y+', 'y-', 'z+', 'z-']
+        # Initialize
+        self.cell_type = np.full(self.n_dofs, CellType.INTERIOR, dtype=np.int32)
 
-        # Iterate over each node
-        for node_idx, node_data in enumerate(intersections):
-            is_conductor = False
-            is_boundary = False
+        # Store exact distances for matrix assembly
+        self.boundary_distances = min_distances.astype(np.float64)
 
-            for dir_idx, direction in enumerate(directions):
-                dir_data = node_data[direction]
-                min_dist = np.inf
+        # 1. CONDUCTOR CLASSIFICATION
+        # Jordan Curve Theorem: Odd number of hits in any direction means inside.
+        # We check across axis=1 (all 6 directions)
+        is_conductor = (hit_counts % 2 != 0).any(axis=1)
 
-                for elec_id, elec_data in dir_data.items():
-                    if not elec_data:
-                        continue
+        # 2. BOUNDARY CLASSIFICATION
+        # If the minimum distance is less than the grid step in that direction
+        mesh_sizes = np.array([self.hx, self.hx, self.hy, self.hy, self.hz, self.hz], dtype=np.float32)
 
-                    dists = elec_data["distances"]
+        # Broadcasting handles comparing (N, 6) with (6,) arrays instantly
+        is_boundary = (min_distances <= mesh_sizes).any(axis=1)
 
-                    if len(dists) == 0:
-                        continue
+        # A node cannot be a boundary if it is strictly inside a conductor
+        is_boundary = is_boundary & ~is_conductor
 
-                    # Jordan Curve Theorem: An odd number of ray intersections
-                    # means the ray origin is strictly INSIDE the closed volume.
-                    if len(dists) % 2 != 0:
-                        is_conductor = True
-
-                    # Find closest boundary in this direction
-                    current_min = np.min(dists)
-                    if current_min < min_dist:
-                        min_dist = current_min
-
-                # Save the exact distance for Shortley-Weller stencil later
-                self.boundary_distances[node_idx, dir_idx] = min_dist
-
-                # If the nearest wall is within one cell step, it's a boundary node
-                if min_dist <= mesh_sizes[dir_idx]:
-                    is_boundary = True
-
-            # Assign type (Conductor takes precedence over boundary)
-            if is_conductor:
-                self.cell_type[node_idx] = CellType.CONDUCTOR
-            elif is_boundary:
-                self.cell_type[node_idx] = CellType.BOUNDARY
+        # 3. APPLY MASKS
+        self.cell_type[is_boundary] = CellType.BOUNDARY
+        self.cell_type[is_conductor] = CellType.CONDUCTOR
 
         # Log statistics
-        n_conductor = np.sum(self.cell_type == CellType.CONDUCTOR)
-        n_boundary = np.sum(self.cell_type == CellType.BOUNDARY)
-        n_interior = np.sum(self.cell_type == CellType.INTERIOR)
+        n_conductor = np.sum(is_conductor)
+        n_boundary = np.sum(is_boundary)
+        n_interior = self.n_dofs - n_conductor - n_boundary
 
         print(f"  Conductor cells: {n_conductor:,d} ({100 * n_conductor / self.n_dofs:.1f}%)")
         print(f"  Boundary cells:  {n_boundary:,d} ({100 * n_boundary / self.n_dofs:.1f}%)")
@@ -329,10 +307,7 @@ class PyAMGPoissonSolver:
 
         print(f"    Active DOFs (interior+boundary): {self.n_active_dofs:,d} / {self.n_dofs:,d}")
 
-        # lil_matrix is fastest for incremental, random-access construction
         A_temp = lil_matrix((self.n_active_dofs, self.n_active_dofs), dtype=np.float64)
-
-        print("  Building matrix stencil...")
 
         for i in range(self.nx):
             if i % 10 == 0:
@@ -348,98 +323,114 @@ class PyAMGPoissonSolver:
                     idx_new = self.dof_mapping[idx_old]
                     diag_val = 0.0
 
-                    # ----------------------------------------------------
+                    # =========================================================
                     # X - AXIS (i)
-                    # ----------------------------------------------------
+                    # =========================================================
+                    i_pos = i + 1
+                    i_neg = i - 1
 
-                    # +x neighbor
-                    ni_pos = i + 1
-                    is_pos_valid = ni_pos < self.nx
-                    idx_pos = self._ijk_to_idx(ni_pos, j, k) if is_pos_valid else -1
-
-                    if is_pos_valid and self.cell_type[idx_pos] == CellType.CONDUCTOR:
-                        # Fetch true distance, clamp to 0.1% of h to prevent infinite diagonals
-                        hx_pos = max(self.boundary_distances[idx_old, 0], self.hx * 1e-3)
+                    # +X Neighbor
+                    if i_pos < self.nx:
+                        idx_pos = self._ijk_to_idx(i_pos, j, k)
+                        is_cond = self.cell_type[idx_pos] == CellType.CONDUCTOR
+                        hx_pos = max(self.boundary_distances[idx_old, 0], self.hx * 1e-3) if is_cond else self.hx
                     else:
+                        is_cond = False
                         hx_pos = self.hx
+                        idx_pos = -1
 
-                    # -x neighbor
-                    ni_neg = i - 1
-                    is_neg_valid = ni_neg >= 0
-                    idx_neg = self._ijk_to_idx(ni_neg, j, k) if is_neg_valid else -1
-
-                    if is_neg_valid and self.cell_type[idx_neg] == CellType.CONDUCTOR:
-                        hx_neg = max(self.boundary_distances[idx_old, 1], self.hx * 1e-3)
+                    # -X Neighbor
+                    if i_neg >= 0:
+                        idx_neg = self._ijk_to_idx(i_neg, j, k)
+                        is_cond_neg = self.cell_type[idx_neg] == CellType.CONDUCTOR
+                        hx_neg = max(self.boundary_distances[idx_old, 1], self.hx * 1e-3) if is_cond_neg else self.hx
                     else:
+                        is_cond_neg = False
                         hx_neg = self.hx
+                        idx_neg = -1
 
-                    # Add Shortley-Weller diagonal contribution
+                    # Apply to matrix
                     diag_val += 2.0 / (hx_pos * hx_neg)
 
-                    # Add off-diagonal contributions (if neighbor is not a conductor)
-                    if is_pos_valid and self.cell_type[idx_pos] != CellType.CONDUCTOR:
+                    if i_pos < self.nx and not is_cond:
                         A_temp[idx_new, self.dof_mapping[idx_pos]] = -2.0 / (hx_pos * (hx_pos + hx_neg))
 
-                    if is_neg_valid and self.cell_type[idx_neg] != CellType.CONDUCTOR:
+                    if i_neg >= 0 and not is_cond_neg:
                         A_temp[idx_new, self.dof_mapping[idx_neg]] = -2.0 / (hx_neg * (hx_pos + hx_neg))
 
-                    # ----------------------------------------------------
+                    # =========================================================
                     # Y - AXIS (j)
-                    # ----------------------------------------------------
+                    # =========================================================
+                    j_pos = j + 1
+                    j_neg = j - 1
 
-                    nj_pos = j + 1
-                    is_pos_valid = nj_pos < self.ny
-                    idx_pos = self._ijk_to_idx(i, nj_pos, k) if is_pos_valid else -1
-                    if is_pos_valid and self.cell_type[idx_pos] == CellType.CONDUCTOR:
-                        hy_pos = max(self.boundary_distances[idx_old, 2], self.hy * 1e-3)
+                    # +Y Neighbor
+                    if j_pos < self.ny:
+                        idx_pos = self._ijk_to_idx(i, j_pos, k)
+                        is_cond = self.cell_type[idx_pos] == CellType.CONDUCTOR
+                        hy_pos = max(self.boundary_distances[idx_old, 2], self.hy * 1e-3) if is_cond else self.hy
                     else:
+                        is_cond = False
                         hy_pos = self.hy
+                        idx_pos = -1
 
-                    nj_neg = j - 1
-                    is_neg_valid = nj_neg >= 0
-                    idx_neg = self._ijk_to_idx(i, nj_neg, k) if is_neg_valid else -1
-                    if is_neg_valid and self.cell_type[idx_neg] == CellType.CONDUCTOR:
-                        hy_neg = max(self.boundary_distances[idx_old, 3], self.hy * 1e-3)
+                    # -Y Neighbor
+                    if j_neg >= 0:
+                        idx_neg = self._ijk_to_idx(i, j_neg, k)
+                        is_cond_neg = self.cell_type[idx_neg] == CellType.CONDUCTOR
+                        hy_neg = max(self.boundary_distances[idx_old, 3], self.hy * 1e-3) if is_cond_neg else self.hy
                     else:
+                        is_cond_neg = False
                         hy_neg = self.hy
+                        idx_neg = -1
 
+                    # Apply to matrix
                     diag_val += 2.0 / (hy_pos * hy_neg)
 
-                    if is_pos_valid and self.cell_type[idx_pos] != CellType.CONDUCTOR:
+                    if j_pos < self.ny and not is_cond:
                         A_temp[idx_new, self.dof_mapping[idx_pos]] = -2.0 / (hy_pos * (hy_pos + hy_neg))
-                    if is_neg_valid and self.cell_type[idx_neg] != CellType.CONDUCTOR:
+
+                    if j_neg >= 0 and not is_cond_neg:
                         A_temp[idx_new, self.dof_mapping[idx_neg]] = -2.0 / (hy_neg * (hy_pos + hy_neg))
 
-                    # ----------------------------------------------------
+                    # =========================================================
                     # Z - AXIS (k)
-                    # ----------------------------------------------------
+                    # =========================================================
+                    k_pos = k + 1
+                    k_neg = k - 1
 
-                    nk_pos = k + 1
-                    is_pos_valid = nk_pos < self.nz
-                    idx_pos = self._ijk_to_idx(i, j, nk_pos) if is_pos_valid else -1
-                    if is_pos_valid and self.cell_type[idx_pos] == CellType.CONDUCTOR:
-                        hz_pos = max(self.boundary_distances[idx_old, 4], self.hz * 1e-3)
+                    # +Z Neighbor
+                    if k_pos < self.nz:
+                        idx_pos = self._ijk_to_idx(i, j, k_pos)
+                        is_cond = self.cell_type[idx_pos] == CellType.CONDUCTOR
+                        hz_pos = max(self.boundary_distances[idx_old, 4], self.hz * 1e-3) if is_cond else self.hz
                     else:
+                        is_cond = False
                         hz_pos = self.hz
+                        idx_pos = -1
 
-                    nk_neg = k - 1
-                    is_neg_valid = nk_neg >= 0
-                    idx_neg = self._ijk_to_idx(i, j, nk_neg) if is_neg_valid else -1
-                    if is_neg_valid and self.cell_type[idx_neg] == CellType.CONDUCTOR:
-                        hz_neg = max(self.boundary_distances[idx_old, 5], self.hz * 1e-3)
+                    # -Z Neighbor
+                    if k_neg >= 0:
+                        idx_neg = self._ijk_to_idx(i, j, k_neg)
+                        is_cond_neg = self.cell_type[idx_neg] == CellType.CONDUCTOR
+                        hz_neg = max(self.boundary_distances[idx_old, 5], self.hz * 1e-3) if is_cond_neg else self.hz
                     else:
+                        is_cond_neg = False
                         hz_neg = self.hz
+                        idx_neg = -1
 
+                    # Apply to matrix
                     diag_val += 2.0 / (hz_pos * hz_neg)
 
-                    if is_pos_valid and self.cell_type[idx_pos] != CellType.CONDUCTOR:
+                    if k_pos < self.nz and not is_cond:
                         A_temp[idx_new, self.dof_mapping[idx_pos]] = -2.0 / (hz_pos * (hz_pos + hz_neg))
-                    if is_neg_valid and self.cell_type[idx_neg] != CellType.CONDUCTOR:
+
+                    if k_neg >= 0 and not is_cond_neg:
                         A_temp[idx_new, self.dof_mapping[idx_neg]] = -2.0 / (hz_neg * (hz_pos + hz_neg))
 
-                    # ----------------------------------------------------
+                    # =========================================================
                     # Set Final Diagonal
-                    # ----------------------------------------------------
+                    # =========================================================
                     A_temp[idx_new, idx_new] = diag_val
 
         # Convert to CSR format
@@ -450,6 +441,7 @@ class PyAMGPoissonSolver:
             f"    Reduced matrix: {self.A.nnz:,d} nonzeros ({100 * self.A.nnz / (self.n_active_dofs ** 2):.3f}% dense)")
 
         self._check_matrix_health()
+
 
     def _build_amg_hierarchy(self):
         """
@@ -533,29 +525,41 @@ class PyAMGPoissonSolver:
         print(f"    Nonzeros: {self.A.nnz:,d}")
         print(f"    Density: {100 * self.A.nnz / (self.A.shape[0] * self.A.shape[1]):.4f}%")
 
-        # Check for empty rows/columns
-        row_sums = np.array(self.A.sum(axis=1)).flatten()
-        col_sums = np.array(self.A.sum(axis=0)).flatten()
+        # 1. Check for truly empty rows (disconnected nodes)
+        # Using indptr array in CSR format: if indptr[i] == indptr[i+1], row i has no entries.
+        row_nnz = np.diff(self.A.indptr)
+        empty_rows = np.sum(row_nnz == 0)
 
-        zero_rows = np.sum(row_sums == 0)
-        zero_cols = np.sum(col_sums == 0)
+        if empty_rows > 0:
+            print(f"    ! CRITICAL: Found {empty_rows} completely empty/disconnected rows")
 
-        if zero_rows > 0:
-            print(f"    ! Found {zero_rows} rows with zero sum")
-        if zero_cols > 0:
-            print(f"    ! Found {zero_cols} columns with zero sum")
-
-        # Check for NaN or Inf
+        # 2. Check for NaN or Inf
         if np.any(np.isnan(self.A.data)):
-            print(f"    X Matrix contains NaN values!")
+            print(f"    ! CRITICAL: Matrix contains NaN values!")
         if np.any(np.isinf(self.A.data)):
-            print(f"    X Matrix contains Inf values!")
+            print(f"    ! CRITICAL: Matrix contains Inf values!")
 
-        # Diagonal dominance
-        diag = np.abs(self.A.diagonal())
-        off_diag = np.abs(self.A.sum(axis=1).A1) - diag
-        strictly_diag_dom = np.sum(diag > off_diag)
-        print(f"    Diag. dominant rows: {strictly_diag_dom}/{self.n_dofs}")
+        # 3. Diagonal Dominance Check
+        diag = self.A.diagonal()
+
+        # Check for zeros on the diagonal (fatal for iterative solvers)
+        zero_diags = np.sum(diag == 0)
+        if zero_diags > 0:
+            print(f"    ! CRITICAL: Found {zero_diags} rows with zero on the diagonal")
+
+        # To check diagonal dominance, we must sum the ABSOLUTE values of the row,
+        # then subtract the absolute value of the diagonal.
+        # A matrix is diagonally dominant if |a_ii| >= sum(|a_ij|) for j != i
+        abs_A = np.abs(self.A)
+        abs_row_sums = np.array(abs_A.sum(axis=1)).flatten()
+        abs_off_diag_sums = abs_row_sums - np.abs(diag)
+
+        # Using >= instead of > because Poisson interior nodes are *weakly* diagonally dominant (|a_ii| == sum(|a_ij|))
+        # Boundary nodes are strictly diagonally dominant (|a_ii| > sum(|a_ij|))
+        weakly_diag_dom = np.sum(np.abs(diag) >= abs_off_diag_sums - 1e-10)  # Small tol for float math
+        strictly_diag_dom = np.sum(np.abs(diag) > abs_off_diag_sums + 1e-10)
+
+        print(f"    Diag. dominant rows: {weakly_diag_dom}/{self.n_active_dofs} (Strict: {strictly_diag_dom})")
         print(f"    Diagonal range: [{diag.min():.2e}, {diag.max():.2e}]")
         print(f"    Data range: [{self.A.data.min():.2e}, {self.A.data.max():.2e}]")
 
@@ -672,20 +676,23 @@ class PyAMGPoissonSolver:
         def callback(rk):
             """GMRES convergence callback"""
             iteration_count[0] += 1
-            residuals.append(float(rk))
+            # Since callback_type='pr_norm', rk is guaranteed to be a float
+            res_val = float(rk)
+            residuals.append(res_val)
             if iteration_count[0] % 5 == 0:
-                logging.info(f"    GMRES iter {iteration_count[0]:3d}: residual={rk:.2e}")
+                logging.info(f"    GMRES iter {iteration_count[0]:3d}: residual={res_val:.2e}")
 
         def preconditioner_matvec(r):
-            """Apply one AMG V-cycle"""
+            """Apply one AMG V-cycle as a preconditioner"""
             return self.amg.solve(
-                r,
+                b=r,
+                x0=None,
                 tol=self.config.amg_precond_tol,
                 maxiter=self.config.amg_precond_maxiter,
-                acycle='V'
+                cycle='V'
             )
 
-        M = LinearOperator((self.n_dofs, self.n_dofs), matvec=preconditioner_matvec)
+        M = LinearOperator((self.n_active_dofs, self.n_active_dofs), matvec=preconditioner_matvec)
 
         logging.info("  Solving with GMRES (scipy) + AMG preconditioner...")
 
@@ -693,14 +700,19 @@ class PyAMGPoissonSolver:
             self.A,
             b_cpu,
             M=M,
-            tol=self.config.solver_tol,
+            rtol=self.config.solver_tol,
+            atol=0.0,
             restart=self.config.gmres_restart,
             maxiter=self.config.max_iterations,
             callback=callback,
+            callback_type='pr_norm'  # Fix for deprecation warning
         )
 
         if gmres_info != 0:
-            logging.warning(f"  GMRES warning: info={gmres_info}")
+            if gmres_info > 0:
+                logging.warning(f"  GMRES warning: Did not converge after {gmres_info} iterations")
+            else:
+                logging.error(f"  GMRES error: Illegal input or breakdown (info={gmres_info})")
 
         t_solve = time.time()
 
@@ -902,7 +914,7 @@ class PyAMGPoissonSolver:
         """Assemble RHS vector for reduced system (interior+boundary DOFs only)"""
 
         # Full RHS
-        b_full = -rho.copy()
+        b_full = rho.copy() / EPS0
 
         # Extract only active DOFs
         b = b_full[self.keep_indices]
@@ -912,7 +924,7 @@ class PyAMGPoissonSolver:
     def _assemble_rhs_gpu(self, rho_gpu: cp.ndarray) -> cp.ndarray:
         """Assemble RHS vector on GPU for reduced system"""
 
-        b_full_gpu = -rho_gpu.copy()
+        b_full_gpu = rho_gpu.copy() / EPS0
 
         # Extract only active DOFs
         keep_indices_gpu = cp.asarray(self.keep_indices, dtype=cp.int32)
