@@ -110,3 +110,7 @@ venv.bak/
 *.c
 /backup/
 /creade_md.py
+/examples/debug_output/
+/examples/results/
+/examples/temp/
+/backup/

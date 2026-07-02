@@ -71,15 +71,15 @@ def plot_field_slice(field: Field,
 
     Examples
     --------
-    >>> field = Field.from_file('magnetic_field.table')
-    >>> fig, axes = plot_field_slice(field, axis='z', intersect=0.0)
+    > field = Field.from_file('magnetic_field.table')
+    > fig, axes = plot_field_slice(field, axis='z', intersect=0.0)
 
-    >>> # Custom limits: xy plane from -5 to 5 cm
-    >>> plot_field_slice(field, axis='z', intersect=0.0,
+    > # Custom limits: xy plane from -5 to 5 cm
+    > plot_field_slice(field, axis='z', intersect=0.0,
     ...                  limits=((-0.05, 0.05), (-0.05, 0.05)))
 
-    >>> # Save to file
-    >>> plot_field_slice(field, axis='x', intersect=0.01, save='field_slice.png')
+    > # Save to file
+    > plot_field_slice(field, axis='x', intersect=0.01, save='field_slice.png')
     """
 
     # Validate inputs
@@ -151,7 +151,8 @@ def plot_field_slice(field: Field,
         pts[:, 2] = C2.ravel()
 
     # Query field
-    fx, fy, fz = field(pts)
+    result = field(pts)
+    fx, fy, fz = result[:, 0], result[:, 1], result[:, 2]
 
     # Reshape to 2D
     fx = fx.reshape(resolution, resolution)

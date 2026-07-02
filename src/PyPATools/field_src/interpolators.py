@@ -401,6 +401,15 @@ class NumbaInterpolator:
 
         return result
 
+    @property
+    def grid(self):
+        return self._grid
+
+    @property
+    def values(self):
+        """Return the field values on the grid."""
+        return self._values
+
     def _check_bounds(self, xi):
         """Check if points are within bounds."""
         for i, (xmin, xmax) in enumerate(self._bounds):
@@ -518,6 +527,11 @@ class CoordinateMapper:
                                      left=-1, right=len(grid_1d))
 
         return coords
+
+    @property
+    def values(self):
+        """Return the field values on the grid."""
+        return self._values
 
     def _check_bounds_grid(self, coords):
         """Check grid coordinates are in bounds."""

@@ -70,9 +70,9 @@ def load_field_openpmd(
 
     Example
     -------
-    >>> field_data = load_field_openpmd('fields.h5', iteration=0, field_name='B')
-    >>> Bx = field_data['values']['x']
-    >>> grid_x = field_data['grid']['x']
+    > field_data = load_field_openpmd('fields.h5', iteration=0, field_name='B')
+    > Bx = field_data['values']['x']
+    > grid_x = field_data['grid']['x']
     """
     _check_openpmd_available()
 
@@ -210,11 +210,11 @@ def save_field_openpmd(
 
     Example
     -------
-    >>> field_data = {
+    > field_data = {
     ...     'grid': {'x': x_array, 'y': y_array, 'z': z_array},
     ...     'values': {'x': Bx_array, 'y': By_array, 'z': Bz_array}
     ... }
-    >>> save_field_openpmd('fields_%T.h5', field_data, iteration=0, field_name='B')
+    > save_field_openpmd('fields_%T.h5', field_data, iteration=0, field_name='B')
     """
     _check_openpmd_available()
 
@@ -364,7 +364,7 @@ def convert_h5part_to_openpmd(
 
     Example
     -------
-    >>> convert_h5part_to_openpmd('old_format.h5', 'new_format.h5')
+    > convert_h5part_to_openpmd('old_format.h5', 'new_format.h5')
     """
     try:
         import h5py

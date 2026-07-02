@@ -10,6 +10,7 @@ Author: Refactored for PyPATools cyclotron design suite
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from .field_src.field_loaders import *
+from .field_src.field_writers import write_comsol
 import h5py
 import pickle
 import os
@@ -161,6 +162,12 @@ class Field(FieldBase):
         if field is not None:
             self._field = field
 
+        # Raw grid axes / nodal values (populated by from_arrays / from_file).
+        # Kept alongside the interpolators so saving is a direct array dump
+        # instead of an interpolator round-trip.
+        self._grid = None
+        self._values = None
+
         # Dispatch table for different dimensions
         self._call_dispatch = {
             0: self._get_field_0d,
@@ -201,7 +208,7 @@ class Field(FieldBase):
         > field.plot(axis='x', intersect=0.01,
         ...            limits=((-0.05, 0.05), (-0.05, 0.05)))
         """
-        from field_src.field_visualization import plot_field_slice
+        from .field_src.field_visualization import plot_field_slice
 
         return plot_field_slice(self, axis=axis, intersect=intersect,
                                 limits=limits, **kwargs)
@@ -328,6 +335,10 @@ class Field(FieldBase):
             field._dim = _data['dim']
             field._metadata = _data['metadata']
 
+            # Keep the raw arrays (direct saving, no interpolator round-trip)
+            field._grid = {k: np.asarray(v) for k, v in _data['grid'].items()}
+            field._values = {k: np.asarray(v) for k, v in _data['values'].items()}
+
             # Create interpolators
             for component in ['x', 'y', 'z']:
                 if component in _data['values']:
@@ -371,6 +382,10 @@ class Field(FieldBase):
         # Determine dimensionality
         grid_points = [grid[k] for k in ['x', 'y', 'z'] if k in grid and len(grid[k]) > 1]
         field._dim = len(grid_points)
+
+        # Keep the raw arrays (direct saving, no interpolator round-trip)
+        field._grid = {k: np.asarray(v) for k, v in grid.items()}
+        field._values = {k: np.asarray(v) for k, v in values.items()}
 
         # Create interpolators
         for component in ['x', 'y', 'z']:
@@ -433,6 +448,71 @@ class Field(FieldBase):
     @property
     def metadata(self) -> dict:
         return self._metadata
+
+    @property
+    def grid(self) -> Optional[Dict[str, np.ndarray]]:
+        """Raw grid axes {'x','y','z'} (1D, meters), or None if not grid-based."""
+        return self._grid
+
+    @property
+    def grid_values(self) -> Optional[Dict[str, np.ndarray]]:
+        """Raw UNSCALED nodal field values on the grid, or None if not grid-based.
+
+        Note: ``scaling`` is applied on evaluation (``__call__``) and on save,
+        not to these stored arrays.
+        """
+        return self._values
+
+    def _grid_and_values(self) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+        """Return (grid, scaled values), reconstructing from the interpolators
+        if the raw arrays are unavailable (e.g. fields from old pickles)."""
+        if self._grid is not None and self._values is not None:
+            values = {k: self._scaling * np.asarray(v) for k, v in self._values.items()}
+            return self._grid, values
+
+        # Fallback: reconstruct from an interpolator's grid and evaluate on it.
+        interp = self._field.get("x") or self._field.get("y") or self._field.get("z")
+        if interp is None or not hasattr(interp, "grid") or interp.grid is None:
+            raise ValueError(
+                "Field has no raw grid arrays and its interpolators do not expose "
+                "a grid; cannot save this field to a grid-based format."
+            )
+        axes = [np.asarray(g) for g in interp.grid]
+        spatial = ['x', 'y', 'z'][:len(axes)]
+        grid = {k: a for k, a in zip(spatial, axes)}
+        mesh = np.meshgrid(*axes, indexing='ij')
+        pts_nd = np.column_stack([m.ravel() for m in mesh])
+        # Pad to (M, 3) for __call__ (missing coordinates evaluate at 0).
+        pts = np.zeros((pts_nd.shape[0], 3))
+        pts[:, :pts_nd.shape[1]] = pts_nd
+        b = self(pts)  # (M, 3), scaling applied by __call__
+        shape = tuple(len(a) for a in axes)
+        values = {c: b[:, i].reshape(shape) for i, c in enumerate(('x', 'y', 'z'))}
+        return grid, values
+
+    def save(self, filename: str, **kwargs) -> int:
+        """
+        Save the field to file, dispatching on the extension (mirror of from_file).
+
+        Supported: '.comsol' (text table via write_comsol), '.h5'/'.h5part'
+        (save_to_h5part), '.pickle' (save_pickle). Extra kwargs are passed to
+        the format writer (e.g. components='z' for a midplane Bz-only .comsol).
+        """
+        _, ext = os.path.splitext(filename)
+        ext = ext.lower()
+
+        if ext == ".pickle":
+            self.save_pickle(filename)
+            return 0
+        if ext in (".h5", ".h5part"):
+            return self.save_to_h5part(filename, **kwargs)
+        if ext == ".comsol":
+            grid, values = self._grid_and_values()
+            return write_comsol(filename, grid, values, **kwargs)
+
+        raise ValueError(
+            f"Unknown output extension '{ext}'. Supported: .comsol, .h5, .h5part, .pickle"
+        )
 
     # ========================================================================
     # Internal Evaluation Methods
@@ -513,7 +593,8 @@ class Field(FieldBase):
             data = pickle.load(f)
 
         # Restore attributes
-        for key in ['_label', '_dim', '_scaling', '_field', '_unit_scale', '_metadata']:
+        for key in ['_label', '_dim', '_scaling', '_field', '_unit_scale', '_metadata',
+                    '_grid', '_values']:
             if key in data:
                 setattr(self, key, data[key])
 
@@ -525,13 +606,187 @@ class Field(FieldBase):
             '_scaling': self._scaling,
             '_field': self._field,
             '_unit_scale': self._unit_scale,
-            '_metadata': self._metadata
+            '_metadata': self._metadata,
+            '_grid': self._grid,
+            '_values': self._values
         }
 
         with open(filename, "wb") as f:
             pickle.dump(data, f)
 
         print(f"Saved field to {filename}")
+
+    def save_to_h5part(self,
+                       filename: str,
+                       spacing: Optional[Union[List[float], np.ndarray]] = None,
+                       r_min: Optional[Union[List[float], np.ndarray]] = None,
+                       r_max: Optional[Union[List[float], np.ndarray]] = None,
+                       efield: Optional[Dict[str, np.ndarray]] = None,
+                       resonance_frequency_hz: float = 32800000.0) -> int:
+        """
+        Save field to H5Part format.
+
+        Parameters
+        ----------
+        filename : str
+            Output filename (should end with .h5 or .h5part)
+        spacing : array_like, optional
+            Grid spacing [dx, dy, dz] in meters. If not provided, will be
+            auto-detected from the interpolator grid.
+        r_min : array_like, optional
+            Minimum grid extent [xmin, ymin, zmin] in meters. If not provided,
+            will be auto-detected from the interpolator grid.
+        r_max : array_like, optional
+            Maximum grid extent [xmax, ymax, zmax] in meters. If not provided,
+            will be auto-detected from the interpolator grid.
+        efield : dict, optional
+            Electric field components {'x': Ex, 'y': Ey, 'z': Ez} as 3D arrays.
+            If not provided, E-field will be written as zeros.
+        resonance_frequency_hz : float, optional
+            Value written to the file-level "Resonance Frequency(Hz)" attribute.
+
+        Returns
+        -------
+        int
+            0 on success
+
+        Notes
+        -----
+        - Only 3D fields are supported for H5Part output
+        - The file format follows the H5Part specification with Efield and Hfield groups
+        - Data is stored with shape (nz, ny, nx) in the file
+        """
+        assert self._dim == 3, "Saving to h5part only implemented for 3D fields at the moment!"
+
+        # Auto-detect grid parameters from interpolator if not provided
+        if spacing is None or r_min is None or r_max is None:
+            # Get grid from the first available interpolator
+            interp = self._field["x"]
+            if hasattr(interp, 'grid') and interp.grid is not None:
+                grid = interp.grid
+                if spacing is None:
+                    spacing = [grid[0][1] - grid[0][0],
+                               grid[1][1] - grid[1][0],
+                               grid[2][1] - grid[2][0]]
+                if r_min is None:
+                    r_min = [grid[0][0], grid[1][0], grid[2][0]]
+                if r_max is None:
+                    r_max = [grid[0][-1], grid[1][-1], grid[2][-1]]
+            else:
+                raise ValueError(
+                    "Grid parameters (spacing, r_min, r_max) must be provided "
+                    "for fields without accessible grid information"
+                )
+
+        spacing = np.asarray(spacing, dtype=np.float64)
+        r_min = np.asarray(r_min, dtype=np.float64)
+        r_max = np.asarray(r_max, dtype=np.float64)
+
+        # Calculate number of points in each dimension (rint: guard against
+        # floating-point truncation silently dropping a grid plane)
+        nr = np.rint((r_max - r_min) / spacing + 1).astype(int)
+
+        if self._debug:
+            print(f"Saving field to '{os.path.split(filename)[1]}'")
+            print(f"r_min = {r_min}, r_max = {r_max}")
+            print(f"spacing = {spacing}")
+            print(f"grid size = {nr}")
+
+        # Use the stored nodal arrays directly when they match the requested grid
+        # (no interpolator round-trip); otherwise evaluate the interpolators.
+        use_raw = (
+            self._grid is not None and self._values is not None
+            and all(k in self._grid for k in ('x', 'y', 'z'))
+            and tuple(len(self._grid[k]) for k in ('x', 'y', 'z')) == tuple(nr)
+            and all(np.allclose([self._grid[k][0], self._grid[k][-1]],
+                                [r_min[i], r_max[i]])
+                    for i, k in enumerate(('x', 'y', 'z')))
+        )
+
+        if use_raw:
+            shape = tuple(nr)
+            _bx = self._scaling * np.asarray(self._values['x']).reshape(shape)
+            _by = self._scaling * np.asarray(self._values['y']).reshape(shape)
+            _bz = self._scaling * np.asarray(self._values['z']).reshape(shape)
+        else:
+            # Generate meshgrid for field evaluation
+            x_mesh, y_mesh, z_mesh = np.meshgrid(
+                np.linspace(r_min[0], r_max[0], nr[0]),
+                np.linspace(r_min[1], r_max[1], nr[1]),
+                np.linspace(r_min[2], r_max[2], nr[2]),
+                indexing='ij', sparse=False
+            )
+
+            # Evaluate field at all grid points
+            # The interpolator expects (M, 3) array, so we need to flatten and stack
+            pts = np.column_stack([x_mesh.ravel(), y_mesh.ravel(), z_mesh.ravel()])
+
+            # Get field values (scaled)
+            field_values = self(pts)  # Returns (M, 3) array
+            _bx = field_values[:, 0].reshape(nr[0], nr[1], nr[2])
+            _by = field_values[:, 1].reshape(nr[0], nr[1], nr[2])
+            _bz = field_values[:, 2].reshape(nr[0], nr[1], nr[2])
+
+        # Transpose data from (nx, ny, nz) to the file's (nz, ny, nx) layout
+        _data = {
+            "null": np.zeros([nr[2], nr[1], nr[0]]),
+            "hx": np.ascontiguousarray(np.transpose(_bx, (2, 1, 0))),
+            "hy": np.ascontiguousarray(np.transpose(_by, (2, 1, 0))),
+            "hz": np.ascontiguousarray(np.transpose(_bz, (2, 1, 0))),
+        }
+
+        # Add E-field if provided
+        if efield is not None:
+            _data["ex"] = np.ascontiguousarray(np.transpose(np.asarray(efield['x']), (2, 1, 0)))
+            _data["ey"] = np.ascontiguousarray(np.transpose(np.asarray(efield['y']), (2, 1, 0)))
+            _data["ez"] = np.ascontiguousarray(np.transpose(np.asarray(efield['z']), (2, 1, 0)))
+
+        # Create new h5 file
+        try:
+            os.remove(filename)
+        except Exception:
+            pass
+
+        h5_file = h5py.File(filename, "w")
+
+        # Create the zeroth step and the Block inside of it
+        h5_file.attrs.__setitem__("Resonance Frequency(Hz)",
+                                  np.array([float(resonance_frequency_hz)]))
+        step0 = h5_file.create_group("Step#0")
+        block = step0.create_group("Block")
+
+        # Create the E Field group
+        e_field = block.create_group("Efield")
+
+        # Store the x, y, and z data for the E Field
+        e_field.create_dataset("0", data=_data["null"] if efield is None else _data["ex"])
+        e_field.create_dataset("1", data=_data["null"] if efield is None else _data["ey"])
+        e_field.create_dataset("2", data=_data["null"] if efield is None else _data["ez"])
+
+        # Set the spacing and origin attributes for the E Field group
+        e_field.attrs.__setitem__("__Spacing__", spacing)
+        e_field.attrs.__setitem__("__Origin__", r_min)
+
+        # Create the H Field group
+        h_field = block.create_group("Hfield")
+
+        # Store the x, y, and z data points for the H Field
+        h_field.create_dataset("0", data=_data["hx"])
+        h_field.create_dataset("1", data=_data["hy"])
+        h_field.create_dataset("2", data=_data["hz"])
+
+        # Set the spacing and origin attributes for the H Field group
+        h_field.attrs.__setitem__("__Spacing__", spacing)
+        h_field.attrs.__setitem__("__Origin__", r_min)
+
+        if self._debug:
+            print("\nBfield Shape:")
+            print(_data["hx"].shape)
+
+        # Close the file
+        h5_file.close()
+
+        return 0
 
     @staticmethod
     def _load_h5part(filename: str, **kwargs):
