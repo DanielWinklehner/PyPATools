@@ -68,51 +68,67 @@ def _calculate_energies_batch(px, py, pz, mass_mev, z_energy, relativistic):
     return energies
 
 
-@njit(fastmath=True, cache=True)
-def _velocity_from_momentum(p, relativistic, clight):
-    """Convert momentum (β·γ) to velocity."""
-    if relativistic:
-        return clight * p / np.sqrt(p ** 2 + 1.0)
-    else:
-        return clight * p
-
-
 @njit(parallel=True, fastmath=True, nogil=True, cache=True)
 def _velocities_from_momenta_batch(momenta, relativistic, clight):
-    """Convert momenta to velocities (parallelized)."""
+    """Convert beta*gamma momenta to velocities [m/s] (parallelized).
+
+    NORM-AWARE (matches OPAL Util::getBeta, src/Classic/Utilities/Util.h:
+    ``getGamma(p) = sqrt(dot(p,p) + 1)``): the Lorentz factor comes from the
+    FULL momentum 3-vector, gamma = sqrt(1 + |P|^2), and v = c * P / gamma.
+    The previous per-component form v_j = c*P_j/sqrt(P_j^2 + 1) is only exact
+    for purely axial motion and produced a wrong energy for in-plane
+    (cyclotron) motion.
+    """
     N = momenta.shape[0]
     velocities = np.empty((N, 3), dtype=np.float64)
 
     for i in prange(N):
-        for j in range(3):
-            velocities[i, j] = _velocity_from_momentum(momenta[i, j],
-                                                       relativistic, clight)
+        px = momenta[i, 0]
+        py = momenta[i, 1]
+        pz = momenta[i, 2]
+        if relativistic:
+            gamma = np.sqrt(px * px + py * py + pz * pz + 1.0)
+            f = clight / gamma
+        else:
+            f = clight
+        velocities[i, 0] = f * px
+        velocities[i, 1] = f * py
+        velocities[i, 2] = f * pz
 
     return velocities
 
 
-@njit(fastmath=True, cache=True)
-def _momentum_from_velocity(v, relativistic, clight):
-    """Convert velocity to momentum (β·γ)."""
-    if relativistic:
-        v_sq = v ** 2
-        if v_sq >= clight ** 2:
-            v_sq = 0.99999 * clight ** 2
-        return v / np.sqrt(clight ** 2 - v_sq)
-    else:
-        return v / clight
-
-
 @njit(parallel=True, fastmath=True, nogil=True, cache=True)
 def _momenta_from_velocities_batch(velocities, relativistic, clight):
-    """Convert velocities to momenta (parallelized)."""
+    """Convert velocities [m/s] to beta*gamma momenta (parallelized).
+
+    NORM-AWARE (matches OPAL): beta*gamma_j = v_j / sqrt(c^2 - |v|^2), using
+    the FULL speed |v| so the Lorentz factor is shared across components. The
+    previous per-component form v_j / sqrt(c^2 - v_j^2) is only exact for
+    purely axial motion. The v->P->v round trip is preserved (both directions
+    now use the full norm), so tracking dynamics are unchanged; only the
+    energy derived from |P| becomes correct for non-axial motion.
+    """
     N = velocities.shape[0]
     momenta = np.empty((N, 3), dtype=np.float64)
+    c2 = clight * clight
 
     for i in prange(N):
-        for j in range(3):
-            momenta[i, j] = _momentum_from_velocity(velocities[i, j],
-                                                    relativistic, clight)
+        vx = velocities[i, 0]
+        vy = velocities[i, 1]
+        vz = velocities[i, 2]
+        if relativistic:
+            v2 = vx * vx + vy * vy + vz * vz
+            if v2 >= c2:
+                v2 = 0.99999 * c2
+            denom = np.sqrt(c2 - v2)
+            momenta[i, 0] = vx / denom
+            momenta[i, 1] = vy / denom
+            momenta[i, 2] = vz / denom
+        else:
+            momenta[i, 0] = vx / clight
+            momenta[i, 1] = vy / clight
+            momenta[i, 2] = vz / clight
 
     return momenta
 
@@ -397,7 +413,10 @@ class ParticleDistribution(object):
             return _velocities_from_momenta_batch(self._p_vec, RELATIVISTIC, CLIGHT)
         else:
             if RELATIVISTIC:
-                return CLIGHT * self._p_vec / np.sqrt(self._p_vec ** 2.0 + 1.0)
+                # norm-aware: gamma from the full |P| (see the numba kernel)
+                gamma = np.sqrt(np.sum(self._p_vec ** 2, axis=1,
+                                       keepdims=True) + 1.0)
+                return CLIGHT * self._p_vec / gamma
             else:
                 return CLIGHT * self._p_vec
 
@@ -431,7 +450,10 @@ class ParticleDistribution(object):
             self._p_vec = _momenta_from_velocities_batch(v_vec, RELATIVISTIC, CLIGHT)
         else:
             if RELATIVISTIC:
-                self._p_vec = v_vec / np.sqrt(CLIGHT ** 2 - v_vec ** 2)
+                # norm-aware: shared gamma from the full speed |v|
+                v2 = np.sum(v_vec ** 2, axis=1, keepdims=True)
+                v2 = np.minimum(v2, 0.99999 * CLIGHT ** 2)
+                self._p_vec = v_vec / np.sqrt(CLIGHT ** 2 - v2)
             else:
                 self._p_vec = v_vec / CLIGHT
 
@@ -450,7 +472,10 @@ class ParticleDistribution(object):
             self._p_vec = _momenta_from_velocities_batch(v_vec, RELATIVISTIC, CLIGHT)
         else:
             if RELATIVISTIC:
-                self._p_vec = v_vec / np.sqrt(CLIGHT ** 2 - v_vec ** 2)
+                # norm-aware: shared gamma from the full speed |v|
+                v2 = np.sum(v_vec ** 2, axis=1, keepdims=True)
+                v2 = np.minimum(v2, 0.99999 * CLIGHT ** 2)
+                self._p_vec = v_vec / np.sqrt(CLIGHT ** 2 - v2)
             else:
                 self._p_vec = v_vec / CLIGHT
 

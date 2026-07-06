@@ -256,6 +256,75 @@ def load_opera_table(filename, extents=None, extents_dims=None):
     return result
 
 
+_COMSOL_OPS = {"*", "/", "+", "-", "^"}
+_COMSOL_UNIT_RE = re.compile(r"^\([a-zA-Z/]+\)$")
+
+
+def _split_comsol_header_columns(header_line):
+    """Split a COMSOL export header into per-column expression strings.
+
+    Symmetry-unfolded exports use MATH EXPRESSIONS as column headers, e.g.
+      -(mf.Bx * mir1side - mf.By * (mir1side - 1)) * (2 * mir2side - 1)
+    so naive whitespace splitting fragments them. Tokenize with parenthesis-
+    depth tracking (spaces inside (...) do not split), drop unit annotations
+    like (T), then group tokens into columns: a new column starts whenever an
+    OPERAND follows another operand with no operator in between.
+
+    Returns (columns, unit_tokens).
+    """
+    s = header_line.lstrip("%").strip()
+    tokens = []
+    buf = ""
+    depth = 0
+    for ch in s:
+        if ch.isspace() and depth == 0:
+            if buf:
+                tokens.append(buf)
+                buf = ""
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        buf += ch
+    if buf:
+        tokens.append(buf)
+
+    units = [t for t in tokens if _COMSOL_UNIT_RE.match(t)]
+    tokens = [t for t in tokens if not _COMSOL_UNIT_RE.match(t)]
+
+    columns = []
+    cur = []
+    prev_operand = False
+    for tok in tokens:
+        if tok in _COMSOL_OPS:
+            cur.append(tok)
+            prev_operand = False
+            continue
+        if prev_operand and cur:
+            columns.append(" ".join(cur))
+            cur = []
+        cur.append(tok)
+        prev_operand = True
+    if cur:
+        columns.append(" ".join(cur))
+    return columns, units
+
+
+def _comsol_component_of(expr):
+    """Identify the physical field component an export expression represents.
+
+    Symmetry-unfolding expressions reference several components (Bx' mixes
+    mf.Bx and mf.By); the LEADING component reference is the one the
+    expression reconstructs (COMSOL's unfolding formulas are built that way).
+    Returns e.g. ('B', 'x') or None if no component reference is found.
+    """
+    m = re.search(r"(?:mf|es)\.([BE])(x|y|z|r|phi|theta)\b", expr)
+    if m is None:
+        m = re.search(r"\b([BE])(x|y|z|r|phi|theta)\b", expr)
+    return (m.group(1), m.group(2)) if m else None
+
+
 def load_comsol(filename):
     """
     Load COMSOL .comsol format field map.
@@ -317,6 +386,8 @@ def load_comsol(filename):
             data = {}
             spatial_coords = []
             field_coords = []
+            n_expr = None
+            header_line = None
 
             for i in range(9):
                 line = infile.readline().strip()
@@ -326,55 +397,92 @@ def load_comsol(filename):
                     file_dim = int(sline[2])
                 elif i == 4:
                     array_len = int(sline[2])
+                elif i == 5:
+                    # "% Expressions: N" -- number of FIELD columns; the
+                    # remaining columns are spatial coordinates.
+                    try:
+                        n_expr = int(sline[2])
+                    except (IndexError, ValueError):
+                        n_expr = None
                 elif i == 7:
                     l_unit = sline[3]
                 elif i == 8:
-                    # Detect field type and parse column headers
-                    b_unit = None
-                    e_unit = None
+                    header_line = line
 
-                    if "(T)" in line:
-                        b_unit = "T"
-                        field_type = 'magnetic'
-                    elif "(V/cm)" in line:
-                        e_unit = "V/cm"
-                        field_type = 'electric'
-                    elif "(V/m)" in line:
-                        e_unit = "V/m"
-                        field_type = 'electric'
-                    else:
-                        if "mf.B" in line:
-                            b_unit = "T"
-                            field_type = 'magnetic'
-                        elif "es.E" in line:
-                            e_unit = "V/m"
-                            field_type = 'electric'
-                        else:
-                            raise ValueError("Cannot determine field type from header")
+            if header_line is None:
+                raise ValueError("Missing column-header line")
 
-                    # Parse column headers
-                    sline = sline[:4] + re.split(r'\([a-zA-Z/]+\)', ''.join(sline[4:]))
+            # Field type / units from the annotations (or the expressions).
+            b_unit = None
+            e_unit = None
+            if "(T)" in header_line or "mf.B" in header_line:
+                b_unit = "T"
+                field_type = 'magnetic'
+            elif "(V/cm)" in header_line:
+                e_unit = "V/cm"
+                field_type = 'electric'
+            elif "(V/m)" in header_line or "es.E" in header_line:
+                e_unit = "V/m"
+                field_type = 'electric'
+            else:
+                raise ValueError("Cannot determine field type from header")
 
-                    j = 0
-                    for label in sline:
-                        if label not in ["%", "(T)", "(V/cm)", "(V/m)", "", " "]:
-                            clean_label = re.sub(r'side|mir|sec|cpl|\d+', '', label)
+            # Column headers may be MATH EXPRESSIONS (symmetry-unfolded
+            # exports): split with parenthesis awareness, then identify each
+            # field expression's component. Values are loaded VERBATIM --
+            # the expression already encodes whatever orientation the model
+            # uses, and the loader stays agnostic to it (species/current
+            # sense differ per project; consumers align orientation).
+            columns, _units = _split_comsol_header_columns(header_line)
+            if n_expr is None or not (0 < n_expr < len(columns)):
+                n_expr_guess = sum(1 for c in columns
+                                   if _comsol_component_of(c) is not None)
+                n_expr = n_expr_guess or 3
+            n_coord = len(columns) - n_expr
+            if n_coord < 1:
+                raise ValueError(f"Column split failed for header: "
+                                 f"{header_line!r} -> {columns}")
 
-                            if clean_label in label_map:
-                                nlabel = label_map[clean_label]
-                                data[nlabel] = {"column": j}
+            for j, col in enumerate(columns[:n_coord]):
+                clean_label = re.sub(r'side|mir|sec|cpl|\d+', '', col)
+                if clean_label not in label_map:
+                    raise ValueError(f"Unrecognized spatial column {col!r}")
+                nlabel = label_map[clean_label]
+                data[nlabel] = {"column": j, "unit": l_unit}
+                spatial_coords.append(nlabel)
 
-                                if nlabel in ["X", "Y", "Z", "R", "PHI", "THETA"]:
-                                    data[nlabel]["unit"] = l_unit
-                                    spatial_coords.append(nlabel)
-                                elif nlabel in ["BX", "BY", "BZ", "BR", "BPHI", "BTHETA"] and b_unit:
-                                    data[nlabel]["unit"] = b_unit
-                                    field_coords.append(nlabel)
-                                elif nlabel in ["EX", "EY", "EZ", "ER", "EPHI", "ETHETA"] and e_unit:
-                                    data[nlabel]["unit"] = e_unit
-                                    field_coords.append(nlabel)
+            unassigned = []
+            for j, col in enumerate(columns[n_coord:], start=n_coord):
+                comp = _comsol_component_of(col)
+                if comp is None:
+                    unassigned.append(j)
+                    continue
+                kind, axis = comp
+                nlabel = (("B" if field_type == 'magnetic' else "E")
+                          + axis.upper())
+                if nlabel in data:
+                    raise ValueError(
+                        f"Two field columns map to {nlabel}: check the "
+                        f"export expressions ({header_line!r})")
+                data[nlabel] = {"column": j,
+                                "unit": b_unit if field_type == 'magnetic'
+                                else e_unit}
+                field_coords.append(nlabel)
 
-                                j += 1
+            # Positional fallback for expressions with no recognizable
+            # component reference: fill x, y, z in column order.
+            if unassigned:
+                prefix = "B" if field_type == 'magnetic' else "E"
+                free = [prefix + ax for ax in ("X", "Y", "Z")
+                        if prefix + ax not in data]
+                for j, nlabel in zip(unassigned, free):
+                    print(f"Note: field column {j} ({columns[j]!r}) has no "
+                          f"recognizable component; assigning {nlabel} by "
+                          f"position.")
+                    data[nlabel] = {"column": j,
+                                    "unit": b_unit if field_type == 'magnetic'
+                                    else e_unit}
+                    field_coords.append(nlabel)
 
         if not spatial_coords:
             raise ValueError("No spatial coordinates found in file")

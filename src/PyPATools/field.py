@@ -322,6 +322,16 @@ class Field(FieldBase):
             _data = field._load_opera_table(filename, **kwargs)
         elif ext == ".comsol":
             _data = field._load_comsol(filename, **kwargs)
+        elif ext == ".txt":
+            # COMSOL's DEFAULT export extension is .txt: sniff the header.
+            with open(filename, 'r') as f:
+                first = f.readline()
+            if first.lstrip().startswith("% Model"):
+                _data = field._load_comsol(filename, **kwargs)
+            else:
+                raise ValueError(
+                    f".txt file is not a recognized COMSOL export "
+                    f"(expected a '% Model:' header): {filename}")
         elif ext == ".dat":
             _data = field._load_opal_midplane(filename, **kwargs)
         elif ext == ".map":
