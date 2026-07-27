@@ -27,10 +27,18 @@ Notes:
 """
 
 import numpy as np
-from typing import Tuple, Callable
+from typing import Tuple, Callable, TYPE_CHECKING
 import warnings
 from .global_variables import CLIGHT
-from py_electrodes.py_electrodes import PyElectrodeAssembly
+
+if TYPE_CHECKING:  # import only for type checkers, not at runtime
+    from py_electrodes.py_electrodes import PyElectrodeAssembly
+
+# NOTE: py_electrodes is intentionally NOT imported at module level. Its import
+# calls MPI_Init, which makes importing PyPATools require a working MPI fabric
+# (e.g. I_MPI_FABRICS=shm in sandboxed shells) even for pure tracking work.
+# Pusher only ever RECEIVES an already-constructed PyElectrodeAssembly, so the
+# import is needed only by callers that build one themselves.
 
 try:
     from numba import njit, prange
@@ -466,7 +474,7 @@ class Pusher:
                   'vay_rel', 'rk4_rel', 'yoshida_rel']
 
     def __init__(self, ion, algorithm: str = 'boris',
-                 use_numba: bool = True, electrode_assembly: PyElectrodeAssembly = None):
+                 use_numba: bool = True, electrode_assembly: "PyElectrodeAssembly" = None):
         """Initialize pusher with ion species and algorithm."""
         self.ion = ion
         self.q_over_m = ion.q_over_m

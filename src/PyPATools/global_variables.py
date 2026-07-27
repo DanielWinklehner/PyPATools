@@ -3,13 +3,14 @@ from scipy import constants as const
 import os
 import sys
 import shutil
+import tempfile
+import atexit
 from .colors import MyColors
 
 # --- Set global variables from settings.txt file--- #
 settings = SettingsHandler()
 DEBUG = (settings["DEBUG"] == "True")
 DECIMALS = int(settings["DECIMALS"])
-TEMP_DIR = settings["TEMP_DIR"]
 RELATIVISTIC = (settings["RELATIVISTIC"] == "True")
 Z_ENERGY = (settings["Z_ENERGY"] == "True")  # If true, only the z component is used for beam energy (paraxial approx.)
 USE_MULTIPROC = True  # In case we are not using mpi or only using 1 processor, fall back on multiprocessing
@@ -23,10 +24,11 @@ else:
     LOG_FONT = "Monospace"
     LOG_FONT_SIZE = 10
 
-# Temporary directory for saving intermittent files
-if os.path.exists(TEMP_DIR):
-    shutil.rmtree(TEMP_DIR)
-os.mkdir(TEMP_DIR)
+# Temporary directory for saving intermittent files: unique per process
+# (race-free for concurrently running processes/multiprocessing workers),
+# removed automatically at interpreter exit. Same strategy as py_electrodes.
+TEMP_DIR = tempfile.mkdtemp(prefix="PyPATools_")
+atexit.register(lambda: shutil.rmtree(TEMP_DIR, ignore_errors=True))
 
 # Other variables
 COLORS = MyColors()

@@ -129,6 +129,11 @@ class Tracker:
         """
         ef, bf, pusher = self.efield, self.bfield, self.pusher
 
+        # Time-dependent fields (e.g. TimedField) expose set_time(); the time is
+        # frozen at the STEP MIDPOINT for each push (second-order accurate).
+        # Fields without set_time take the exact pre-existing code path.
+        set_time = getattr(ef, "set_time", None)
+
         r = np.array(pd.x_vec, dtype=float, copy=True)
         v = np.array(pd.v_vec, dtype=float, copy=True)
         active = np.array(pd.alive, dtype=bool, copy=True)
@@ -136,6 +141,8 @@ class Tracker:
 
         # Boris: stagger velocity half a step back (v-only; positions stay on-grid).
         if self._boris and np.any(active):
+            if set_time is not None:
+                set_time(t)
             _, v[active] = pusher.push_batch(r[active], v[active], ef, bf, -0.5 * dt)
 
         pbar = tqdm(total=n_steps, ncols=120, desc="Tracking") if (show_progress and tqdm) else None
@@ -149,6 +156,8 @@ class Tracker:
             v_prev = v.copy()
 
             # 1) advance active particles
+            if set_time is not None:
+                set_time(t + 0.5 * dt)
             r[active], v[active] = pusher.push_batch(r[active], v[active], ef, bf, dt)
 
             # 2) interactions (e.g. RF kicks) - pre-increment t
@@ -184,6 +193,8 @@ class Tracker:
         # Boris: forward half-step (v-only), only on normal completion - matching the
         # legacy loops, whose early returns leave the staggered velocity as-is.
         if self._boris and not stopped and np.any(active):
+            if set_time is not None:
+                set_time(t)
             _, v[active] = pusher.push_batch(r[active], v[active], ef, bf, 0.5 * dt)
 
         if pbar is not None:

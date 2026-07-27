@@ -955,6 +955,51 @@ class ScaledField(FieldBase):
         return self.scale * field_values + self.offset
 
 
+class TimedField(FieldBase):
+    """
+    Harmonically modulated field: F(pts, t) = static(pts) * cos(omega * t + phase).
+
+    Time is FROZEN between ``set_time()`` calls: ``__call__`` always uses the
+    last time set, so a multi-stage integrator (e.g. RK4) evaluates a
+    consistent snapshot within one step. ``PyPATools.trackers.Tracker``
+    duck-types ``set_time`` and advances it to the step midpoint before each
+    push (second-order accurate phase freezing); any other driver must call
+    ``set_time`` itself.
+
+    Parameters
+    ----------
+    static_field : FieldBase or callable
+        Spatial pattern, evaluated as ``static_field(pts) -> (M, 3)``.
+    omega : float
+        Angular frequency [rad/s].
+    phase : float
+        Phase offset [rad].
+    t : float
+        Initial frozen time [s].
+    """
+
+    def __init__(self, static_field, omega: float, phase: float = 0.0, t: float = 0.0):
+        self.static = static_field
+        self.omega = float(omega)
+        self.phase = float(phase)
+        self.t = float(t)
+
+    def set_time(self, t: float):
+        """Freeze the modulation time [s] used by subsequent evaluations."""
+        self.t = float(t)
+
+    def amplitude(self) -> float:
+        """Current modulation factor cos(omega * t + phase)."""
+        return float(np.cos(self.omega * self.t + self.phase))
+
+    def __call__(self, pts: np.ndarray) -> np.ndarray:
+        return self.static(pts) * np.cos(self.omega * self.t + self.phase)
+
+    def __str__(self):
+        return (f"TimedField(omega={self.omega:.6e} rad/s, phase={self.phase:.4f} rad, "
+                f"t={self.t:.6e} s) wrapping {self.static}")
+
+
 # ============================================================================
 # Field Map Container
 # ============================================================================
