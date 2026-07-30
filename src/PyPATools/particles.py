@@ -1279,6 +1279,13 @@ class ParticleDistribution(object):
             recalculate=True
         )
 
+    @staticmethod
+    def register_format(name, loader=None, saver=None, extensions=(),
+                        sniffer=None):
+        """Register a custom particle file format (see particle_io.register_format)."""
+        particle_io.register_format(name, loader=loader, saver=saver,
+                                    extensions=extensions, sniffer=sniffer)
+
     @classmethod
     def from_file(cls, filename: str, format: str = 'auto', **kwargs) -> 'ParticleDistribution':
         """
@@ -1300,32 +1307,14 @@ class ParticleDistribution(object):
             Loaded distribution
         """
 
-        # Auto-detect format
+        # Auto-detect format (content sniffers first, then extension)
         if format == 'auto':
-            ext = os.path.splitext(filename)[1].lower()
-            format_map = {
-                '.h5': 'opal',
-                '.bp': 'openpmd',
-                '.dst': 'tracewin',
-                '.ini': 'tracewin',
-                '.npz': 'npz',
-                '.lst': 'aima'
-            }
-            format = format_map.get(ext, 'opal')
+            format = particle_io.detect_format(filename, default='opal')
 
-        # Load data
-        if format == 'opal':
-            positions, momenta, metadata = particle_io.load_opal_h5(filename, **kwargs)
-        elif format == 'openpmd':
-            positions, momenta, metadata = particle_io.load_openpmd(filename, **kwargs)
-        elif format == 'tracewin':
-            positions, momenta, metadata = particle_io.load_tracewin(filename, **kwargs)
-        elif format == 'npz':
-            positions, momenta, metadata = particle_io.load_npz(filename)
-        elif format == 'aima':
-            positions, momenta, metadata = particle_io.load_aima(filename, **kwargs)
-        else:
-            raise ValueError(f"Unknown format: {format}")
+        spec = particle_io.FORMATS.get(format)
+        if spec is None or spec['loader'] is None:
+            raise ValueError(f"No loader registered for format: {format}")
+        positions, momenta, metadata = spec['loader'](filename, **kwargs)
 
         # Extract species if in metadata
         species = metadata.get('species', IonSpecies('proton'))
@@ -1351,22 +1340,17 @@ class ParticleDistribution(object):
         **metadata
             Additional metadata to save
         """
-        # Auto-detect format
+        # Auto-detect format (for saving, extension only; default openPMD)
         if format == 'auto':
             ext = os.path.splitext(filename)[1].lower()
-            format_map = {
-                '.h5': 'opal',
-                '.bp': 'openpmd',
-                '.dst': 'tracewin',
-                '.npz': 'npz',
-                '.lst': 'aima'
-            }
-            format = format_map.get(ext, 'npz')
+            format = 'openpmd' if ext == '.h5' else \
+                particle_io.detect_format(filename, default='npz')
 
         species_data = {
             'mass_mev': self.species.mass_mev,
             'charge_state': self.species.q,
             'a': self.species.a,
+            'z': getattr(self.species, '_z', None),
             'name': self.species.name
         }
 
@@ -1375,24 +1359,15 @@ class ParticleDistribution(object):
             'bunch_freq': self.f,
             'species': self.species
         })
+        metadata.setdefault('reference_energy_mev', self.mean_energy_mev)
+        if self.alive is not None:
+            metadata.setdefault('status', np.where(
+                self.alive, particle_io.STATUS_ALIVE, particle_io.STATUS_LOST))
 
-        # Save
-        if format == 'opal':
-            particle_io.save_opal_h5(filename, self._x_vec, self._p_vec, species_data, **metadata)
-        elif format == 'openpmd':
-            particle_io.save_openpmd(filename, self._x_vec, self._p_vec, species_data, **metadata)
-        elif format == 'tracewin':
-            particle_io.save_tracewin(filename, self._x_vec, self._p_vec, species_data,
-                                      reference_energy_mev=self.mean_energy_mev,
-                                      frequency_mhz=self.f / 1e6)
-        elif format == 'npz':
-            particle_io.save_npz(filename, self._x_vec, self._p_vec, **metadata)
-        elif format == 'aima':
-            particle_io.save_aima(filename, self._x_vec, self._p_vec, species_data,
-                                  reference_energy_mev=self.mean_energy_mev,
-                                  frequency_hz=self.f)
-        else:
-            raise ValueError(f"Unknown format: {format}")
+        spec = particle_io.FORMATS.get(format)
+        if spec is None or spec['saver'] is None:
+            raise ValueError(f"No saver registered for format: {format}")
+        spec['saver'](filename, self._x_vec, self._p_vec, species_data, **metadata)
 
     def plot(self, plot_type: str = 'phase_space', plane: str = 'x', **kwargs):
         """
