@@ -43,5 +43,27 @@ progress = ["tqdm"]
 
 dev = ["pytest", "flake8"]
 
+[tool.ruff]
+# Kept in step with .flake8 -- flake8 cannot read pyproject.toml, so the
+# same two settings have to be stated in both places. Change one, change
+# the other.
+line-length = 120
+
+# Ruff already skips build/ by default and currently skips backup/ only
+# because it honours .gitignore; naming both makes that independent of
+# the ignore rules. Without them ruff reports ~158 errors from the old
+# code parked in backup/.
+extend-exclude = ["build", "backup"]
+
+[tool.ruff.lint]
+# Ruff's default selection is E4/E7/E9 + F, a strict subset of what
+# flake8 checks -- it would pass code that .flake8 rejects. E + W + F
+# lines the two up, and the tree is clean under it.
+#
+# Not exact even so: ruff implements E1/E2/E3 (indentation, whitespace,
+# blank lines) only under --preview, so E301/E302/E303 are caught by
+# flake8 but not by ruff. flake8 remains the authority.
+select = ["E", "W", "F"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
