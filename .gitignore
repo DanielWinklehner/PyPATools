@@ -109,9 +109,8 @@ venv.bak/
 # Cython
 *.c
 /backup/
-/creade_md.py
+/create_md.py
 /examples/debug_output/
 /examples/results/
 /examples/temp/
-/backup/
 /examples/OldVersions/
