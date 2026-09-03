@@ -7,5 +7,41 @@ name = "PyPATools"
 version = "1.0.0"
 dependencies = []
 
+# None of these are needed to import PyPATools. fast/gpu/openpmd/progress are
+# guarded by try/except with a working fallback (or are function-level
+# imports); space-charge is different -- poisson_amg.py imports pyamg and
+# py_electrodes unguarded at module level, so that ONE module will not
+# import without them. Nothing else in the package pulls it in.
+[project.optional-dependencies]
+# JIT acceleration. numba is imported in field.py, pusher.py, particles.py,
+# field_src/interpolators.py and particles_src/distribution_generators.py,
+# each behind a try/except that falls back to pure NumPy -- correct either
+# way, dramatically slower without.
+fast = ["numba"]
+
+# openPMD I/O. Two SEPARATE packages, easily confused:
+#   openpmd-api          -> `openpmd_api`, field meshes
+#                           (field.py, field_src/openpmd_io.py)
+#   openpmd-beamphysics  -> `beamphysics`, particle distributions
+#                           (particles_src/particle_io.py). Note the import
+#                           name is not `pmd_beamphysics`; that spelling is
+#                           the deprecated alias.
+openpmd = ["openpmd-api", "openpmd-beamphysics"]
+
+# GPU backends for the interpolators, pusher and the PyAMG solver. If plain
+# `cupy` tries to build from source, install the wheel matching your CUDA
+# toolkit instead (e.g. cupy-cuda12x).
+gpu = ["cupy"]
+
+# Poisson / space-charge solver (poisson_amg.py). That module ALSO needs
+# py_electrodes, which is not on PyPI -- install it separately from
+# https://github.com/DanielWinklehner/py_electrodes
+space-charge = ["pyamg"]
+
+# Progress bars in trackers.py (guarded; falls back to no progress bar).
+progress = ["tqdm"]
+
+dev = ["pytest", "flake8"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
