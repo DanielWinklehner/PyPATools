@@ -7,7 +7,7 @@ __doc__ = "Simple class to hold and calculate particle data like mass, charge, e
 
 PRESETS = {'proton': {'latex_label': r"$\mathrm{p}^+$",
                       'mass_mev': PMASS_MEV,
-                      'a': 1.00727647,
+                      'a': PMASS_MEV / AMU_MEV,
                       'z': 1.0,
                       'q': 1.0},
            'H_1-': {'latex_label': r"$\mathrm{H}^1-$",
