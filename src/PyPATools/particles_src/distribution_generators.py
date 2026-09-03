@@ -25,7 +25,6 @@ try:
 except ImportError:
     HAS_NUMBA = False
 
-
     def njit(*args, **kwargs):
         def decorator(func):
             return func
@@ -691,7 +690,6 @@ def generate_dist_longitudinal_flattop(
     return z, pz
 
 
-
 # ============================================================================
 # Main Distribution Generator (User-Facing API)
 # ============================================================================
@@ -1047,6 +1045,6 @@ if __name__ == "__main__":
         reference_momentum=0.1,
         n_particles=1000
     )
-    print(f"   ✓ Generated KV distribution")
+    print("   ✓ Generated KV distribution")
 
     print("\n✓ All basic tests passed!")

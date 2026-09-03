@@ -147,7 +147,7 @@ def example_rf_acceleration(field_filename='fixtures/constant_field_3d.pickle',
         x = 0.4 * np.cos(np.deg2rad(ang))
         y = 0.4 * np.sin(np.deg2rad(ang))
 
-        phase = init_phi if i%2==0 else init_phi+180
+        phase = init_phi if i % 2 == 0 else init_phi + 180
 
         cavities.append(RFCavity(
             p1=np.array([0.0, 0.0, 0.0]),  # Cavity line from y=-10cm
@@ -165,7 +165,7 @@ def example_rf_acceleration(field_filename='fixtures/constant_field_3d.pickle',
     beta = np.sqrt(1.0 - 1.0 / gamma ** 2)
     velocity = beta * 299792458.0
 
-    print(f"\n4. Initial conditions:")
+    print("\n4. Initial conditions:")
     print(f"   Energy: {initial_energy_kev:.1f} keV")
     print(f"   Velocity: {velocity:.3e} m/s ({beta * 100:.2f}% of c)")
 
@@ -177,7 +177,7 @@ def example_rf_acceleration(field_filename='fixtures/constant_field_3d.pickle',
     pusher = Pusher(muon, algorithm='boris')
 
     # Track with RF cavities
-    print(f"\n5. Tracking particle with RF acceleration...")
+    print("\n5. Tracking particle with RF acceleration...")
     nsteps = 100000
     dt = 1e-12
 
@@ -201,7 +201,7 @@ def example_rf_acceleration(field_filename='fixtures/constant_field_3d.pickle',
     energy_kev = (gamma_array - 1.0) * muon.mass_mev * 1000.0
 
     # Get cavity statistics
-    print(f"\n6. RF Cavity Statistics:")
+    print("\n6. RF Cavity Statistics:")
     stats = cavities[0].get_statistics()
     print(f"   Crossings: {stats['n_crossings']}")
     print(f"   Total energy gain: {stats['total_energy_gain_keV']:.2f} keV")
@@ -211,7 +211,7 @@ def example_rf_acceleration(field_filename='fixtures/constant_field_3d.pickle',
     print(f"   Energy increase: {energy_kev[-1] - energy_kev[0]:.2f} keV")
 
     # Visualize
-    print(f"\n7. Creating visualization...")
+    print("\n7. Creating visualization...")
 
     fig = plt.figure(figsize=(15, 10))
 
@@ -294,7 +294,7 @@ def example_rf_acceleration(field_filename='fixtures/constant_field_3d.pickle',
     ax4.grid(True, alpha=0.3)
 
     # Plot 5: Energy gain per crossing
-    ax5 = plt.subplot(2, 3, 5)
+    ax5 = plt.subplot(2, 3, 5)  # noqa: F841  (used by the commented-out plot below)
     # if len(crossing_indices) > 1:
     #     energy_gains = np.diff(energy_kev[crossing_indices])
     #     crossing_numbers = np.arange(1, len(energy_gains) + 1)

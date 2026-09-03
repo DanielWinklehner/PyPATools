@@ -8,25 +8,22 @@ Author: Refactored for PyPATools cyclotron design suite
 """
 
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
-from .field_src.field_loaders import *
+from .field_src.field_loaders import (load_aima_agora, load_comsol, load_h5part,
+                                      load_opal_midplane, load_opera_table)
 from .field_src.field_writers import write_comsol
 import h5py
 import pickle
 import os
-import warnings
-from typing import Optional, Union, Tuple, Dict, List, Callable
+from typing import Optional, Union, Tuple, Dict, List
 from abc import ABC, abstractmethod
 from .field_src.interpolators import get_interpolator
 
 try:
-    import numba
-    from numba import njit
+    from numba import njit, prange
 
     HAS_NUMBA = True
 except ImportError:
     HAS_NUMBA = False
-
 
     # Create dummy decorator
     def njit(*args, **kwargs):
@@ -37,8 +34,11 @@ except ImportError:
             return args[0]
         return decorator
 
+    def prange(*args, **kwargs):
+        return range(*args, **kwargs)
+
 try:
-    import openpmd_api as io
+    import openpmd_api as io  # noqa: F401
 
     HAS_OPENPMD = True
 except ImportError:
@@ -85,7 +85,6 @@ class FieldBase(ABC):
             Field components [Fx, Fy, Fz] at each point
         """
         pass
-
 
     def gradient(self, pts: np.ndarray) -> np.ndarray:
         """
@@ -341,7 +340,8 @@ class Field(FieldBase):
 
         if _data is not None:
             # Determine dimensionality
-            grid_points = [_data['grid'][k] for k in ['x', 'y', 'z'] if k in _data['grid'] and len(_data['grid'][k]) > 1]
+            grid_points = [_data['grid'][k] for k in ['x', 'y', 'z']
+                           if k in _data['grid'] and len(_data['grid'][k]) > 1]
             field._dim = _data['dim']
             field._metadata = _data['metadata']
 
@@ -1088,8 +1088,8 @@ def cartesian_to_cylindrical(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> Tup
     return r, theta, z
 
 
-def cylindrical_to_cartesian(r: np.ndarray, theta: np.ndarray, z: np.ndarray) -> Tuple[
-    np.ndarray, np.ndarray, np.ndarray]:
+def cylindrical_to_cartesian(r: np.ndarray, theta: np.ndarray,
+                             z: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert cylindrical to Cartesian coordinates.
 

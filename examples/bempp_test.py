@@ -43,7 +43,7 @@ dlp_pot = bempp.api.operators.potential.laplace.double_layer(p1_space, points)
 u_evaluated = slp_pot * neumann_fun - dlp_pot * dirichlet_fun
 
 # Filter out solution values that are associated with points outside the unit circle.
-u_evaluated = u_evaluated.reshape((n_grid_points,n_grid_points))
+u_evaluated = u_evaluated.reshape((n_grid_points, n_grid_points))
 radius = np.sqrt(plot_grid[0]**2 + plot_grid[1]**2)
 u_evaluated[radius > 1] = np.nan
 

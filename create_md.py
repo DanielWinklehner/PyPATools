@@ -1,12 +1,10 @@
 import os
-from pathlib import Path
 
 
 def create_consolidated_markdown(root_dir=".", output_file="codebase.md"):
     """Generate consolidated markdown from all source files."""
 
     exclude_dirs = {'.git', '__pycache__', '.pytest_cache', 'venv', 'env', 'output', 'resources', '.idea', 'backup'}
-    exclude_files = {'.pyc', '.pyo', '.gitignore'}
 
     with open(output_file, 'w') as out:
         out.write("# PyPATools - Complete Codebase\n\n")

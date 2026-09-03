@@ -1,0 +1,17 @@
+[flake8]
+# The codebase is written to ~120 columns, not 79 -- when this config was
+# added exactly one line in src/ exceeded 120, so this documents the width
+# already in use rather than imposing a new one.
+max-line-length = 120
+
+# extend-exclude keeps flake8's own defaults (.git, __pycache__, .tox, ...)
+# and adds the two gitignored snapshots of older code. Both are full of the
+# errors that were just cleaned out of the live tree; linting them would
+# bury real findings under a few hundred stale ones.
+extend-exclude =
+    build,
+    backup
+
+# F403/F405 (star imports) are deliberately NOT ignored: the three
+# `import *` statements that used to trip them have been replaced with
+# explicit imports, and leaving the checks on keeps them from creeping back.

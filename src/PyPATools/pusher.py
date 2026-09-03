@@ -51,7 +51,6 @@ except ImportError:
         "Install with: pip install numba"
     )
 
-
     # Dummy decorators for fallback
     def njit(*args, **kwargs):
         def decorator(func):
@@ -60,7 +59,6 @@ except ImportError:
         if len(args) == 1 and callable(args[0]):
             return args[0]
         return decorator
-
 
     def prange(*args, **kwargs):
         return range(*args, **kwargs)
@@ -771,7 +769,7 @@ Notes
             # Vay relativistic pusher
             if self.use_numba:
                 v_new_array = vay_push_batch(v_array, efield_array,
-                                            bfield_array, dt, self.q_over_m)
+                                             bfield_array, dt, self.q_over_m)
                 r_new_array = position_update_batch(r_array, v_new_array, dt)
             else:
                 # NumPy fallback
@@ -795,7 +793,7 @@ Notes
             v_new_array = np.empty_like(v_array)
 
             push_fn = (yoshida_rel_push_single if self.relativistic
-                      else yoshida_push_single)
+                       else yoshida_push_single)
 
             for i in range(M):
                 r_new_array[i], v_new_array[i] = push_fn(
@@ -818,7 +816,7 @@ Notes
         simultaneously at each K stage rather than processing sequentially.
         """
         dbetagamma_fn = (rk4_rel_dbetagamma_dt_batch if self.relativistic
-                        else None)
+                         else None)
 
         if not isinstance(dt, float):
             dt = np.broadcast_to(dt[:, np.newaxis], (len(dt), 3))
@@ -958,7 +956,7 @@ Notes
 
             if self.use_numba:
                 v_current = boris_push_batch(v_current, efield_array, bfield_array,
-                                            -0.5 * dt, self.q_over_m)
+                                             -0.5 * dt, self.q_over_m)
             else:
                 for i in range(M):
                     v_current[i] = boris_push_single(v_current[i], efield_array[i],
@@ -978,7 +976,7 @@ Notes
             # Advance all particles
             r_old = r_current[active].copy()
             r_current[active], v_current[active] = self.push_batch(r_current[active], v_current[active],
-                                                   efield, bfield, dt)
+                                                                   efield, bfield, dt)
 
             # Record if needed
             if (step + 1) % rec_every_n_steps == 0:
@@ -1004,7 +1002,7 @@ Notes
 
             if self.use_numba:
                 v_current[active] = boris_push_batch(v_current[active], efield_array, bfield_array,
-                                            0.5 * dt, self.q_over_m)
+                                                     0.5 * dt, self.q_over_m)
             else:
                 for i in range(M):
                     if active[i]:
@@ -1109,7 +1107,7 @@ if __name__ == "__main__":
     v_batch = np.array([[0.0, 1e5, 0.0], [0.0, 1e5, 0.0]])
 
     r_new_batch, v_new_batch = pusher.push_batch(r_batch, v_batch,
-                                                  mock_efield, mock_bfield, dt)
+                                                 mock_efield, mock_bfield, dt)
     print(f"   [OK] Batch: r_shape={r_new_batch.shape}")
 
     # Test 4: Relativistic Vay pusher
@@ -1121,10 +1119,9 @@ if __name__ == "__main__":
     # Test 5: Track single particle
     print("\n5. Testing track:")
     r_hist, v_hist = pusher.track(r, v, mock_efield, mock_bfield,
-                                   nsteps=10, dt=dt, rec_every_n_steps=2)
+                                  nsteps=10, dt=dt, rec_every_n_steps=2)
     print(f"   [OK] Track: r_hist.shape={r_hist.shape}")
 
     print("\n[OK] All tests passed!")
     print(f"\nNumba available: {HAS_NUMBA}")
     print(f"CuPy available: {HAS_CUPY}")
-

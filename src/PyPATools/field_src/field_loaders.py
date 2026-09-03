@@ -393,9 +393,7 @@ def load_comsol(filename):
                 line = infile.readline().strip()
                 sline = line.split()
 
-                if i == 3:
-                    file_dim = int(sline[2])
-                elif i == 4:
+                if i == 4:
                     array_len = int(sline[2])
                 elif i == 5:
                     # "% Expressions: N" -- number of FIELD columns; the
@@ -1366,7 +1364,7 @@ def test_load_h5part():
         assert np.allclose(result['values']['z'], 0.3)
 
         # Check metadata
-        assert result['metadata']['has_efield'] == True
+        assert result['metadata']['has_efield']
         assert np.allclose(result['metadata']['spacing'], [0.01, 0.01, 0.01])
 
         print("test_load_h5part: PASSED")

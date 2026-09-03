@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from PyPATools.field import Field
 from PyPATools.pusher import Pusher
 from PyPATools.species import IonSpecies
-from PyPATools.field_src.field_visualization import plot_field_magnitude
 
 
 def calculate_velocity_from_energy(species, energy_kev):
@@ -176,7 +175,7 @@ def track_muon_trajectory(field_filename='magnetic_field.pickle',
     print("\n8. Creating visualization...")
 
     # Create figure
-    fig = plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(12, 10))
 
     # Plot 1: Field magnitude with trajectory
     ax1 = plt.subplot(2, 2, 1)
@@ -218,7 +217,7 @@ def track_muon_trajectory(field_filename='magnetic_field.pickle',
 
     ax1.set_xlabel('x (m)')
     ax1.set_ylabel('y (m)')
-    ax1.set_title(f'Trajectory on |B| Field Map')
+    ax1.set_title('Trajectory on |B| Field Map')
     ax1.set_aspect('equal')
     ax1.legend()
     ax1.grid(True, alpha=0.3)

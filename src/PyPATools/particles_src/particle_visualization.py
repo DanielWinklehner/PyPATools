@@ -6,7 +6,7 @@ Author: PyPATools Development Team
 
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Optional, Tuple
+from typing import Optional
 
 
 def plot_phase_space(positions: np.ndarray, momenta: np.ndarray,

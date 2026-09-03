@@ -1,4 +1,5 @@
-from .global_variables import *
+from .global_variables import (AMU_MEV, CLIGHT, DEBUG, ECHARGE, EMASS_MEV,
+                               MUMASS_MEV, PMASS_MEV)
 
 __author__ = "Daniel Winklehner, Philip Weigel"
 __doc__ = "Simple class to hold and calculate particle data like mass, charge, etc."
@@ -92,7 +93,6 @@ class IonSpecies(object):
             if latex_label is None:
                 latex_label = species["latex_label"]
 
-            mass_mev = species["mass_mev"]
             z = species["z"]
             a = species["a"]
             q = species["q"]
@@ -166,14 +166,14 @@ class IonSpecies(object):
     @property
     def q_over_a(self):
         """
-        :return: charge state - to - mass number ratio (unitless) 
+        :return: charge state - to - mass number ratio (unitless)
         """
         return self._q / self._a
 
     @property
     def q_over_m(self):
         """
-        :return: charge - to - mass ratio (C/kg) 
+        :return: charge - to - mass ratio (C/kg)
         """
         return self._q * ECHARGE / self._mass_kg
 

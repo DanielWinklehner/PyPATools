@@ -11,7 +11,7 @@ OpenPMD Standard Version: 2.0.0
 
 import numpy as np
 import warnings
-from typing import Dict, Union, Optional, Tuple
+from typing import Dict, Optional
 
 # Optional dependency handling
 try:
@@ -227,7 +227,6 @@ def save_field_openpmd(
 
     grid = field_data['grid']
     values = field_data['values']
-    metadata = field_data.get('metadata', {})
 
     # Determine dimensionality
     dim = field_data.get('dim', len(grid))
@@ -604,7 +603,7 @@ def example_usage():
     try:
         os.remove('example_fields_0.h5')
         print("\n5. Cleaned up example file")
-    except:
+    except OSError:
         pass
 
     print("\n" + "=" * 70)

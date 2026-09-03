@@ -25,16 +25,15 @@ Author: PyPATools Team
 """
 
 import numpy as np
-from scipy.sparse import lil_matrix, csr_matrix, coo_matrix
+from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import gmres, LinearOperator
 import pyamg
 import time
 import logging
 from dataclasses import dataclass
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Optional
 from enum import IntEnum
 import numba as nb
-from .particles import ParticleDistribution
 from py_electrodes.py_electrodes import PyElectrodeAssembly
 from .global_variables import EPS0
 
@@ -185,7 +184,7 @@ class PyAMGPoissonSolver:
         self.n_dofs = self.nx * self.ny * self.nz
 
         print(f"\n{'=' * 70}")
-        print(f"PyAMG Poisson Solver Initialization")
+        print("PyAMG Poisson Solver Initialization")
         print(f"{'=' * 70}")
         print(f"Domain: {self.Lx:.1f} × {self.Ly:.1f} × {self.Lz:.1f} m")
         print(f"Mesh: {self.nx} × {self.ny} × {self.nz} = {self.n_dofs:,d} DOFs")
@@ -442,7 +441,6 @@ class PyAMGPoissonSolver:
 
         self._check_matrix_health()
 
-
     def _build_amg_hierarchy(self):
         """
         Build smoothed aggregation AMG hierarchy (one-time, reused for all solves).
@@ -520,7 +518,7 @@ class PyAMGPoissonSolver:
     def _check_matrix_health(self):
         """Perform diagnostic checks on system matrix."""
 
-        print(f"\n  Matrix Diagnostics:")
+        print("\n  Matrix Diagnostics:")
         print(f"    Shape: {self.A.shape}")
         print(f"    Nonzeros: {self.A.nnz:,d}")
         print(f"    Density: {100 * self.A.nnz / (self.A.shape[0] * self.A.shape[1]):.4f}%")
@@ -535,9 +533,9 @@ class PyAMGPoissonSolver:
 
         # 2. Check for NaN or Inf
         if np.any(np.isnan(self.A.data)):
-            print(f"    ! CRITICAL: Matrix contains NaN values!")
+            print("    ! CRITICAL: Matrix contains NaN values!")
         if np.any(np.isinf(self.A.data)):
-            print(f"    ! CRITICAL: Matrix contains Inf values!")
+            print("    ! CRITICAL: Matrix contains Inf values!")
 
         # 3. Diagonal Dominance Check
         diag = self.A.diagonal()
@@ -569,12 +567,12 @@ class PyAMGPoissonSolver:
         conductor_indices = np.where(self.cell_type == CellType.CONDUCTOR)[0]
         boundary_indices = np.where(self.cell_type == CellType.BOUNDARY)[0]
 
-        print(f"  Conductor row check (first 10):")
+        print("  Conductor row check (first 10):")
         for idx in conductor_indices[:10]:
             row = self.A.getrow(idx)
             print(f"    Row {idx}: nnz={row.nnz}, sum={row.sum():.2e}")
 
-        logging.info(f"  Boundary row check (first 10):")
+        logging.info("  Boundary row check (first 10):")
         for idx in boundary_indices[:10]:
             row = self.A.getrow(idx)
             print(f"    Row {idx}: nnz={row.nnz}, sum={row.sum():.2e}")
@@ -944,7 +942,7 @@ class PyAMGPoissonSolver:
             return
 
         print(f"\n{'=' * 70}")
-        print(f"PyAMG Solver Summary")
+        print("PyAMG Solver Summary")
         print(f"{'=' * 70}")
         print(f"Total solves: {self.turn_count}")
         print(f"Total time: {np.sum(self.solve_times):.1f} sec")
@@ -952,7 +950,6 @@ class PyAMGPoissonSolver:
         print(f"Min/Max: {np.min(self.solve_times) * 1000:.1f} / {np.max(self.solve_times) * 1000:.1f} ms")
         print(f"Std dev: {np.std(self.solve_times) * 1000:.1f} ms")
         print(f"{'=' * 70}\n")
-
 
     def debug_visualize_cell_classification(self, output_file: Optional[str] = None):
         """
@@ -979,14 +976,13 @@ class PyAMGPoissonSolver:
 
         try:
             import matplotlib.pyplot as plt
-            from matplotlib import patches
-            from mpl_toolkits.mplot3d import Axes3D
+            from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers the 3d projection)
         except ImportError:
             logging.error("Matplotlib required for visualization")
             return
 
         print(f"\n{'=' * 70}")
-        print(f"Generating Cell Classification Debug Visualization")
+        print("Generating Cell Classification Debug Visualization")
         print(f"{'=' * 70}")
 
         # Grid coordinates
@@ -1148,7 +1144,7 @@ class PyAMGPoissonSolver:
         n_boundary = np.sum(self.cell_type == CellType.BOUNDARY)
         n_conductor = np.sum(self.cell_type == CellType.CONDUCTOR)
 
-        print(f"\n  Cell Classification Summary:")
+        print("\n  Cell Classification Summary:")
         print(f"    Interior:  {n_interior:,d} ({100 * n_interior / self.n_dofs:.1f}%)")
         print(f"    Boundary:  {n_boundary:,d} ({100 * n_boundary / self.n_dofs:.1f}%)")
         print(f"    Conductor: {n_conductor:,d} ({100 * n_conductor / self.n_dofs:.1f}%)")
@@ -1210,8 +1206,6 @@ if __name__ == "__main__":
     Example: Use PyAMG solver in a cyclotron tracking loop
     """
 
-    import logging
-
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -1263,7 +1257,7 @@ if __name__ == "__main__":
     # Solve
     E_field = solver.solve(particles, charges)
 
-    print(f"\n✓ Field computed successfully!")
+    print("\n✓ Field computed successfully!")
     print(f"Field object: {E_field}")
     print(f"Field dim: {E_field.dim}")
 
@@ -1275,7 +1269,7 @@ if __name__ == "__main__":
     ])
 
     E_at_test = E_field(test_points)
-    print(f"\nField values at test points:")
+    print("\nField values at test points:")
     print(f"  E(0, 0, 0) = {E_at_test[0]}")
     print(f"  E(1, 1, 1) = {E_at_test[1]}")
     print(f"  E(-2, 2, -1) = {E_at_test[2]}")

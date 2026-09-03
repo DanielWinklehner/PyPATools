@@ -59,7 +59,6 @@ if HAS_NUMBA:
                 right = mid
         return left
 
-
     @njit(cache=True, fastmath=True)
     def _searchsorted_with_hint(arr, value, hint):
         """Binary search with cell hint for spatial locality."""
@@ -83,7 +82,6 @@ if HAS_NUMBA:
 
         # Fall back to full binary search
         return _searchsorted_numba(arr, value)
-
 
     @njit(cache=True, fastmath=True)
     def _interp3d_single(x, y, z, grid_x, grid_y, grid_z, values, fill_value):
@@ -133,7 +131,6 @@ if HAS_NUMBA:
         c1 = c01 * (1.0 - ty) + c11 * ty
 
         return c0 * (1.0 - tz) + c1 * tz
-
 
     @njit(cache=True, fastmath=True)
     def _interp3d_single_cached(x, y, z, grid_x, grid_y, grid_z, values, fill_value,
@@ -204,7 +201,6 @@ if HAS_NUMBA:
 
         return values[i] * (1.0 - t) + values[i + 1] * t
 
-
     @njit(cache=True, fastmath=True)
     def _interp2d_single(x, y, grid_x, grid_y, values, fill_value):
         """2D bilinear interpolation for single point."""
@@ -235,7 +231,6 @@ if HAS_NUMBA:
 
         return c0 * (1.0 - ty) + c1 * ty
 
-
     @njit(parallel=True, cache=True, fastmath=True, nogil=True)
     def _interp1d_batch(x_arr, grid_x, values, fill_value):
         """1D interpolation for batch of points."""
@@ -245,7 +240,6 @@ if HAS_NUMBA:
             result[i] = _interp1d_single(x_arr[i], grid_x, values, fill_value)
         return result
 
-
     @njit(parallel=True, cache=True, fastmath=True, nogil=True)
     def _interp2d_batch(x_arr, y_arr, grid_x, grid_y, values, fill_value):
         """2D interpolation for batch of points."""
@@ -254,7 +248,6 @@ if HAS_NUMBA:
         for i in prange(n):
             result[i] = _interp2d_single(x_arr[i], y_arr[i], grid_x, grid_y, values, fill_value)
         return result
-
 
     @njit(parallel=True, cache=True, fastmath=True, nogil=True)
     def _interp3d_batch(x_arr, y_arr, z_arr, grid_x, grid_y, grid_z, values, fill_value):
@@ -269,6 +262,7 @@ if HAS_NUMBA:
 # ============================================================================
 # Backend 1: NumbaInterpolator (Custom Numba JIT)
 # ============================================================================
+
 
 class NumbaInterpolator:
     """
@@ -653,7 +647,7 @@ def benchmark_backends(grid_size=50, n_queries=1000, verbose=True):
 
     if verbose:
         print(f"\n{'=' * 60}")
-        print(f"Benchmarking Interpolators")
+        print("Benchmarking Interpolators")
         print(f"{'=' * 60}")
         print(f"Grid size: {grid_size}x{grid_size}x{grid_size}")
         print(f"Queries: {n_queries}")
@@ -715,9 +709,9 @@ def benchmark_backends(grid_size=50, n_queries=1000, verbose=True):
 
 if __name__ == "__main__":
     print("Testing interpolators.py...")
-    print(f"\nAvailable backends:")
-    print(f"  scipy:  Always available")
-    print(f"  fast:   Always available (map_coordinates)")
+    print("\nAvailable backends:")
+    print("  scipy:  Always available")
+    print("  fast:   Always available (map_coordinates)")
     print(f"  numba:  {'Available' if HAS_NUMBA else 'NOT available (pip install numba)'}")
     print(f"  cupy:   {'Available' if HAS_CUPY else 'NOT available (pip install cupy)'}")
 

@@ -28,8 +28,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PyPATools.poisson_amg import PyAMGPoissonSolver, PyAMGSolverConfig, create_solver
-from py_electrodes.py_electrodes import PyElectrode, PyElectrodeAssembly
+from PyPATools.poisson_amg import PyAMGPoissonSolver, PyAMGSolverConfig  # noqa: E402
+from py_electrodes.py_electrodes import PyElectrode, PyElectrodeAssembly  # noqa: E402
 
 
 # ============================================================================
@@ -61,7 +61,7 @@ def create_uniform_cylindrical_beam(n_particles=100000, length=0.3, radius=0.025
     """
 
     print(f"\n{'=' * 70}")
-    print(f"Creating Uniform Cylindrical Beam")
+    print("Creating Uniform Cylindrical Beam")
     print(f"{'=' * 70}")
     print(f"Number of particles: {n_particles:,d}")
     print(f"Length: {length * 100:.1f} cm")
@@ -118,7 +118,7 @@ def create_electrode_assembly(filename="beam_pipe.brep"):
     """
 
     print(f"\n{'=' * 70}")
-    print(f"Loading Conductor Geometry")
+    print("Loading Conductor Geometry")
     print(f"{'=' * 70}")
 
     # Create PyElectrode from BREP
@@ -166,7 +166,7 @@ def solve_space_charge_field(particles, charges, electrode_assembly):
     """
 
     print(f"\n{'=' * 70}")
-    print(f"Setting Up Field Solver")
+    print("Setting Up Field Solver")
     print(f"{'=' * 70}")
 
     # Domain: ±0.25 m in z, ±0.065 m in x and y
@@ -184,7 +184,7 @@ def solve_space_charge_field(particles, charges, electrode_assembly):
     # solver.debug_visualize_cell_classification()
 
     print(f"\n{'=' * 70}")
-    print(f"Solving Poisson Equation")
+    print("Solving Poisson Equation")
     print(f"{'=' * 70}")
 
     # Solve
@@ -242,7 +242,7 @@ def plot_potential_slices(phi_3d, solver, output_dir=None):
     if output_dir:
         fig.savefig(output_dir / 'potential_x_axis.png', dpi=150, bbox_inches='tight')
 
-    print(f"Potential along x-axis:")
+    print("Potential along x-axis:")
     print(f"  Min: {phi_x.min():.3e} V")
     print(f"  Max: {phi_x.max():.3e} V")
 
@@ -263,7 +263,7 @@ def plot_potential_slices(phi_3d, solver, output_dir=None):
     if output_dir:
         fig.savefig(output_dir / 'potential_z_axis.png', dpi=150, bbox_inches='tight')
 
-    print(f"Potential along z-axis:")
+    print("Potential along z-axis:")
     print(f"  Min: {phi_z.min():.3e} V")
     print(f"  Max: {phi_z.max():.3e} V")
 
@@ -277,7 +277,7 @@ def plot_potential_slices(phi_3d, solver, output_dir=None):
 
     x_mesh, y_mesh = np.meshgrid(x_grid * 1000, y_grid * 1000, indexing='ij')
     contour = ax.contourf(x_mesh, y_mesh, phi_xy, levels=20, cmap='viridis')
-    cbar = plt.colorbar(contour, ax=ax, label='Potential (V)')
+    plt.colorbar(contour, ax=ax, label='Potential (V)')
 
     # Add circle to show beam outline
     circle = plt.Circle((0, 0), 25, fill=False, edgecolor='red', linewidth=2,
@@ -303,7 +303,7 @@ def plot_potential_slices(phi_3d, solver, output_dir=None):
 
     x_mesh, z_mesh = np.meshgrid(x_grid * 1000, z_grid * 1000, indexing='ij')
     contour = ax.contourf(x_mesh, z_mesh, phi_xz, levels=20, cmap='plasma')
-    cbar = plt.colorbar(contour, ax=ax, label='Potential (V)')
+    plt.colorbar(contour, ax=ax, label='Potential (V)')
 
     # Add rectangle to show beam outline
     beam_rect = plt.Rectangle((-25, -150), 50, 300, fill=False, edgecolor='cyan',
@@ -350,7 +350,7 @@ def main():
 
     # Step 4: Plot
     print(f"\n{'=' * 70}")
-    print(f"Generating Plots")
+    print("Generating Plots")
     print(f"{'=' * 70}")
 
     output_dir = Path(__file__).parent / "results" / "uniform_beam_in_pipe"
@@ -360,11 +360,11 @@ def main():
 
     # Summary
     print(f"\n{'=' * 70}")
-    print(f"Example Complete")
+    print("Example Complete")
     print(f"{'=' * 70}")
     print(f"Field object: {E_field}")
-    print(f"You can now use E_field to evaluate the field at any position:")
-    print(f"  E_at_point = E_field(np.array([[0.01, 0.01, 0.01]]))")
+    print("You can now use E_field to evaluate the field at any position:")
+    print("  E_at_point = E_field(np.array([[0.01, 0.01, 0.01]]))")
 
     return phi_3d, E_field, solver, particles, charges
 

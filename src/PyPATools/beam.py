@@ -10,7 +10,7 @@ Key design considerations:
 """
 
 import numpy as np
-from typing import Optional, Tuple
+from typing import Tuple
 from dataclasses import dataclass, field
 from .species import IonSpecies
 from .particles import ParticleDistribution

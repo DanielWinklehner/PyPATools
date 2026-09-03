@@ -22,7 +22,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from PyPATools.field_src.field_loaders import (_comsol_component_of,
+from PyPATools.field_src.field_loaders import (_comsol_component_of,  # noqa: E402
                                                _split_comsol_header_columns,
                                                load_comsol)
 

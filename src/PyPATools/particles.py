@@ -8,7 +8,7 @@ Author: Daniel Winklehner, PyPATools Development Team
 """
 
 import os
-from .global_variables import *
+from .global_variables import CLIGHT, EPSILON, RELATIVISTIC, Z_ENERGY
 import numpy as np
 from .species import IonSpecies
 from typing import Optional, Tuple, List, Literal
@@ -40,6 +40,7 @@ except ImportError:
 # ============================================================================
 # Numba-Accelerated Kernels
 # ============================================================================
+
 
 @njit(fastmath=True, cache=True)
 def _calculate_energy_single(px, py, pz, mass_mev, z_energy, relativistic):
@@ -135,6 +136,7 @@ def _momenta_from_velocities_batch(velocities, relativistic, clight):
 # ============================================================================
 # ParticleDistribution Class
 # ============================================================================
+
 
 class ParticleDistribution(object):
     """
@@ -487,7 +489,7 @@ class ParticleDistribution(object):
     @property
     def xp_vec(self) -> np.ndarray:
         vz_safe = np.where(np.abs(self.v_vec[:, 2]) < 1e-10,
-                          EPSILON, self.v_vec[:, 2])
+                           EPSILON, self.v_vec[:, 2])
         vz_safe_view = np.broadcast_to(vz_safe[:, np.newaxis], (len(vz_safe), 3))
         return self.v_vec / vz_safe_view
 

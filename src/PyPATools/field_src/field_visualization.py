@@ -14,8 +14,7 @@ Usage:
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import cm
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 from ..field import Field
 
 
@@ -90,10 +89,6 @@ def plot_field_slice(field: Field,
     if field.dim == 0:
         raise ValueError("Cannot plot slice of 0D (constant) field")
 
-    # Determine which coordinates to use
-    axis_dict = {'x': 0, 'y': 1, 'z': 2}
-    perp_axis = axis_dict[axis]
-
     # Get axis labels and coordinate arrays
     if axis == 'z':
         coord1_label, coord2_label = 'x', 'y'
@@ -160,7 +155,6 @@ def plot_field_slice(field: Field,
     fz = fz.reshape(resolution, resolution)
 
     # Determine field magnitude for colorbar scaling
-    f_mag = np.sqrt(fx ** 2 + fy ** 2 + fz ** 2)
     vmax = np.max(np.abs([fx, fy, fz]))
 
     # Create figure
