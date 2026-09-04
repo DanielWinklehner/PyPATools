@@ -60,6 +60,7 @@ class PyAMGSolverConfig:
     # Domain
     domain_extent: Tuple[float, float, float]  # (Lx, Ly, Lz) in m
     mesh_cells: Tuple[int, int, int]  # (nx, ny, nz) - number of cells
+    domain_origin: Tuple[float, float, float] = (0.0, 0.0, 0.0)  # box CENTRE in m
 
     # AMG parameters
     amg_strength: float = 0.25
@@ -73,7 +74,7 @@ class PyAMGSolverConfig:
     amg_precond_maxiter: int = 1  # One V-cycle per GMRES iteration
 
     # Boundary handling
-    distance_threshold: float = 1e-4  # cm, for conductor detection
+    distance_threshold: float = 1e-4  # m, for conductor detection
 
     # GPU options
     use_gpu: bool = True
@@ -183,10 +184,23 @@ class PyAMGPoissonSolver:
 
         self.n_dofs = self.nx * self.ny * self.nz
 
+        # domain_origin is the CENTRE of the box, so the default (0, 0, 0)
+        # reproduces the original origin-centred grid exactly.
+        self.ox, self.oy, self.oz = config.domain_origin
+        self.x0, self.y0, self.z0 = (self.ox - self.Lx / 2,
+                                     self.oy - self.Ly / 2,
+                                     self.oz - self.Lz / 2)
+        self.x1, self.y1, self.z1 = (self.x0 + self.Lx,
+                                     self.y0 + self.Ly,
+                                     self.z0 + self.Lz)
+
         print(f"\n{'=' * 70}")
         print("PyAMG Poisson Solver Initialization")
         print(f"{'=' * 70}")
-        print(f"Domain: {self.Lx:.1f} × {self.Ly:.1f} × {self.Lz:.1f} m")
+        print(f"Domain: {self.Lx:.4f} × {self.Ly:.4f} × {self.Lz:.4f} m")
+        print(f"Extent: x=[{self.x0:+.4f}, {self.x1:+.4f}]  "
+              f"y=[{self.y0:+.4f}, {self.y1:+.4f}]  "
+              f"z=[{self.z0:+.4f}, {self.z1:+.4f}] m")
         print(f"Mesh: {self.nx} × {self.ny} × {self.nz} = {self.n_dofs:,d} DOFs")
         print(f"Spacing: Δx={self.hx:.4f}, Δy={self.hy:.4f}, Δz={self.hz:.4f} m")
         print(f"GPU: {self.use_gpu}")
@@ -225,17 +239,19 @@ class PyAMGPoissonSolver:
 
     def _generate_mesh(self):
         """Generate cell center coordinates"""
-        x = np.linspace(-self.Lx / 2 + self.hx / 2, self.Lx / 2 - self.hx / 2, self.nx)
-        y = np.linspace(-self.Ly / 2 + self.hy / 2, self.Ly / 2 - self.hy / 2, self.ny)
-        z = np.linspace(-self.Lz / 2 + self.hz / 2, self.Lz / 2 - self.hz / 2, self.nz)
+        # Cell centres: half a cell in from each face of the box.
+        x = np.linspace(self.x0 + self.hx / 2, self.x1 - self.hx / 2, self.nx)
+        y = np.linspace(self.y0 + self.hy / 2, self.y1 - self.hy / 2, self.ny)
+        z = np.linspace(self.z0 + self.hz / 2, self.z1 - self.hz / 2, self.nz)
+
+        # Cached so solve() and the diagnostics never re-derive them.
+        self.x_grid, self.y_grid, self.z_grid = x, y, z
 
         xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
 
         self.mesh_nodes = np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
 
-        self.mesh_limits = [-self.Lx / 2 + self.hx / 2, self.Lx / 2 - self.hx / 2,
-                            -self.Ly / 2 + self.hy / 2, self.Ly / 2 - self.hy / 2,
-                            -self.Lz / 2 + self.hz / 2, self.Lz / 2 - self.hz / 2]
+        self.mesh_limits = [x[0], x[-1], y[0], y[-1], z[0], z[-1]]
 
     def _classify_cells(self):
         """
@@ -742,15 +758,10 @@ class PyAMGPoissonSolver:
 
         logging.info("  Creating Field object with interpolators...")
 
-        # Grid coordinates
-        x_grid = np.linspace(-self.Lx/2 + self.hx/2, self.Lx/2 - self.hx/2, self.nx)
-        y_grid = np.linspace(-self.Ly/2 + self.hy/2, self.Ly/2 - self.hy/2, self.ny)
-        z_grid = np.linspace(-self.Lz/2 + self.hz/2, self.Lz/2 - self.hz/2, self.nz)
-
         grid_dict = {
-            'x': x_grid,
-            'y': y_grid,
-            'z': z_grid,
+            'x': self.x_grid,
+            'y': self.y_grid,
+            'z': self.z_grid,
         }
 
         values_dict = {
@@ -805,9 +816,9 @@ class PyAMGPoissonSolver:
         rho_gpu = cp.zeros(self.n_dofs, dtype=cp.float64)
 
         # Grid indices
-        px_grid = (particles_gpu[:, 0] + self.Lx / 2) / self.hx
-        py_grid = (particles_gpu[:, 1] + self.Ly / 2) / self.hy
-        pz_grid = (particles_gpu[:, 2] + self.Lz / 2) / self.hz
+        px_grid = (particles_gpu[:, 0] - self.x0) / self.hx
+        py_grid = (particles_gpu[:, 1] - self.y0) / self.hy
+        pz_grid = (particles_gpu[:, 2] - self.z0) / self.hz
 
         # CIC deposition
         ix = cp.floor(px_grid).astype(cp.int32)
@@ -851,9 +862,9 @@ class PyAMGPoissonSolver:
 
         rho = np.zeros(self.n_dofs, dtype=np.float64)
 
-        px_grid = (particles[:, 0] + self.Lx / 2) / self.hx
-        py_grid = (particles[:, 1] + self.Ly / 2) / self.hy
-        pz_grid = (particles[:, 2] + self.Lz / 2) / self.hz
+        px_grid = (particles[:, 0] - self.x0) / self.hx
+        py_grid = (particles[:, 1] - self.y0) / self.hy
+        pz_grid = (particles[:, 2] - self.z0) / self.hz
 
         # Clamp to valid range
         px_grid = np.clip(px_grid, 0, self.nx - 1)
@@ -871,11 +882,18 @@ class PyAMGPoissonSolver:
         return rho
 
     @staticmethod
-    @nb.jit(nopython=True, parallel=True)
+    @nb.jit(nopython=True, cache=True)
     def _cic_deposit_numba(px, py, pz, charges, rho, nx, ny, nz):
-        """Numba-accelerated CIC deposition"""
+        """Numba-accelerated CIC deposition.
 
-        for pid in nb.prange(len(charges)):
+        Deliberately serial: "rho[idx] += ..." with a computed index is a data
+        race under prange, and numba cannot recognise it as a reduction. Measured
+        with parallel=True it lost ~1% of the total charge, nondeterministically
+        (two runs of the same input disagreed). Deposition is cheap next to the
+        GMRES solve, and the GPU path uses cp.add.at, which is atomic.
+        """
+
+        for pid in range(len(charges)):
             ix = int(np.floor(px[pid]))
             iy = int(np.floor(py[pid]))
             iz = int(np.floor(pz[pid]))
@@ -884,9 +902,11 @@ class PyAMGPoissonSolver:
             fy = py[pid] - iy
             fz = pz[pid] - iz
 
-            ix = np.clip(ix, 0, nx - 2)
-            iy = np.clip(iy, 0, ny - 2)
-            iz = np.clip(iz, 0, nz - 2)
+            # Scalar clamp: numba's np.clip requires array arguments, so the
+            # builtins are used here instead.
+            ix = min(max(ix, 0), nx - 2)
+            iy = min(max(iy, 0), ny - 2)
+            iz = min(max(iz, 0), nz - 2)
 
             # Deposit to 8 corners
             for dix in [0, 1]:
@@ -986,9 +1006,7 @@ class PyAMGPoissonSolver:
         print(f"{'=' * 70}")
 
         # Grid coordinates
-        x_grid = np.linspace(-self.Lx / 2 + self.hx / 2, self.Lx / 2 - self.hx / 2, self.nx)
-        y_grid = np.linspace(-self.Ly / 2 + self.hy / 2, self.Ly / 2 - self.hy / 2, self.ny)
-        z_grid = np.linspace(-self.Lz / 2 + self.hz / 2, self.Lz / 2 - self.hz / 2, self.nz)
+        x_grid, y_grid, z_grid = self.x_grid, self.y_grid, self.z_grid
 
         # Color mapping for cell types
         color_map = {
@@ -1028,9 +1046,9 @@ class PyAMGPoissonSolver:
         ax1.set_zlabel('Z (m)', fontsize=10)
         ax1.set_title('3D Cell Classification', fontsize=12, fontweight='bold')
         ax1.legend(loc='upper right', fontsize=9)
-        ax1.set_xlim(-self.Lx / 2, self.Lx / 2)
-        ax1.set_ylim(-self.Ly / 2, self.Ly / 2)
-        ax1.set_zlim(-self.Lz / 2, self.Lz / 2)
+        ax1.set_xlim(self.x0, self.x1)
+        ax1.set_ylim(self.y0, self.y1)
+        ax1.set_zlim(self.z0, self.z1)
 
         # ====================================================================
         # Plot 2: XY slice at z=0 (middle z)
@@ -1062,8 +1080,8 @@ class PyAMGPoissonSolver:
         ax2.grid(True, alpha=0.3)
         ax2.axis('equal')
         ax2.legend(fontsize=9)
-        ax2.set_xlim(-self.Lx / 2 * 100, self.Lx / 2 * 100)
-        ax2.set_ylim(-self.Ly / 2 * 100, self.Ly / 2 * 100)
+        ax2.set_xlim(self.x0 * 100, self.x1 * 100)
+        ax2.set_ylim(self.y0 * 100, self.y1 * 100)
 
         # ====================================================================
         # Plot 3: XZ slice at y=0 (middle y)
@@ -1095,8 +1113,8 @@ class PyAMGPoissonSolver:
         ax3.grid(True, alpha=0.3)
         ax3.axis('equal')
         ax3.legend(fontsize=9)
-        ax3.set_xlim(-self.Lx / 2 * 100, self.Lx / 2 * 100)
-        ax3.set_ylim(-self.Lz / 2 * 100, self.Lz / 2 * 100)
+        ax3.set_xlim(self.x0 * 100, self.x1 * 100)
+        ax3.set_ylim(self.z0 * 100, self.z1 * 100)
 
         # ====================================================================
         # Plot 4: YZ slice at x=0 (middle x)
@@ -1128,8 +1146,8 @@ class PyAMGPoissonSolver:
         ax4.grid(True, alpha=0.3)
         ax4.axis('equal')
         ax4.legend(fontsize=9)
-        ax4.set_xlim(-self.Ly / 2 * 100, self.Ly / 2 * 100)
-        ax4.set_ylim(-self.Lz / 2 * 100, self.Lz / 2 * 100)
+        ax4.set_xlim(self.y0 * 100, self.y1 * 100)
+        ax4.set_ylim(self.z0 * 100, self.z1 * 100)
 
         plt.tight_layout()
 
@@ -1165,9 +1183,13 @@ def create_solver(domain_extent: Tuple[float, float, float],
     Parameters
     ----------
     domain_extent : tuple of float
-        (Lx, Ly, Lz) domain size in cm
+        (Lx, Ly, Lz) domain size in m
     mesh_cells : tuple of int
         (nx, ny, nz) number of cells in each dimension
+    domain_origin : tuple of float, optional
+        (x, y, z) centre of the domain box in m. Defaults to the origin; pass it
+        when the geometry is not centred there, e.g. from an electrode assembly
+        bounding box.
     electrode_assembly : PyElectrodeAssembly
         Conductor geometry
     **config_kwargs
