@@ -92,12 +92,19 @@ def save_openpmd(filename: str, positions: np.ndarray, momenta: np.ndarray,
 
     Recognized metadata keys: species (IonSpecies, ignored here - species_data
     is authoritative), bunch_charge [C], bunch_freq [Hz], status (N,) int,
-    time (N,) or scalar [s]. Everything else is written as a
-    'PyPATools:<key>' attribute if it is a scalar or string.
+    time (N,) or scalar [s], extra_records: {name: (N,) array} written as
+    additional particle records next to the standard ones (e.g. 'phase' [rad]
+    or in-plane coordinates 'u', 'v' [m]; give units as
+    extra_units={name: (unitSI, unitDimension tuple of 7)} or they default to
+    dimensionless). Everything else is written as a 'PyPATools:<key>'
+    attribute if it is a scalar, a string, or a small numeric array (plane
+    origins, normals, ...).
     """
     from beamphysics import ParticleGroup
 
     metadata.pop('species', None)
+    extra_records = metadata.pop('extra_records', None) or {}
+    extra_units = metadata.pop('extra_units', None) or {}
     n = len(positions)
     mass_ev = species_data['mass_mev'] * 1e6
 
@@ -136,8 +143,26 @@ def save_openpmd(filename: str, positions: np.ndarray, momenta: np.ndarray,
         species_group.attrs['PyPATools:bunch_freq_hz'] = bunch_freq
         species_group.attrs['PyPATools:bunch_charge_c'] = bunch_charge
         for key, val in metadata.items():
-            if isinstance(val, (int, float, str, np.number)):
+            if isinstance(val, (int, float, str, np.number, bool)):
                 species_group.attrs[f'PyPATools:{key}'] = val
+            elif isinstance(val, (list, tuple, np.ndarray)):
+                arr = np.asarray(val)
+                if arr.dtype.kind in 'fiub' and arr.size <= 64:
+                    species_group.attrs[f'PyPATools:{key}'] = arr
+        # extra per-particle records (openPMD scalar records with unit attributes)
+        for name, arr in extra_records.items():
+            arr = np.asarray(arr, dtype=float)
+            if arr.shape != (n,):
+                raise ValueError(f"extra record '{name}' must have shape ({n},), got {arr.shape}")
+            if name in species_group:
+                del species_group[name]
+            ds = species_group.create_dataset(name, data=arr)
+            unit_si, unit_dim = extra_units.get(name, (1.0, (0, 0, 0, 0, 0, 0, 0)))
+            ds.attrs['unitSI'] = float(unit_si)
+            ds.attrs['unitDimension'] = np.asarray(unit_dim, dtype=float)
+            ds.attrs['timeOffset'] = 0.0
+            ds.attrs['weightingPower'] = 0.0
+            ds.attrs['macroWeighted'] = np.uint32(0)
 
 
 def load_openpmd(filename: str, iteration: Optional[int] = None,
@@ -158,7 +183,7 @@ def load_openpmd(filename: str, iteration: Optional[int] = None,
         attrs = {k[len('PyPATools:'):]: v for k, v in species_group.attrs.items()
                  if k.startswith('PyPATools:')}
 
-    name = attrs.pop('species_name', pg.species)
+    name = attrs.pop('pypatools_species_name', None) or attrs.pop('species_name', pg.species)
     try:
         species = IonSpecies(name,
                              a=attrs.pop('species_a', None),
@@ -178,7 +203,21 @@ def load_openpmd(filename: str, iteration: Optional[int] = None,
     metadata['bunch_freq'] = float(attrs.pop('bunch_freq_hz', 0.0))
     metadata['status'] = pg.status
     metadata['time'] = pg.t
-    metadata.update(attrs)  # remaining PyPATools:* user metadata
+    metadata.update(attrs)  # remaining PyPATools:* user metadata (scalars, strings, small arrays)
+    # extra per-particle records written by save_openpmd (anything that is not a standard record)
+    standard = {'position', 'positionOffset', 'momentum', 'charge', 'mass', 'weight', 'weighting',
+                'time', 'status', 'id', 'particleStatus', 'speciesType', 'numParticles'}
+    extra = {}
+    with h5py.File(filename, 'r') as f:
+        ppath = f.attrs['particlesPath']
+        if isinstance(ppath, bytes):
+            ppath = ppath.decode()
+        (species_group,) = f[ppath].values()
+        for key, item in species_group.items():
+            if key not in standard and isinstance(item, h5py.Dataset) and item.shape == (len(positions),):
+                extra[key] = item[()]
+    if extra:
+        metadata['extra_records'] = extra
     return positions, momenta, metadata
 
 
