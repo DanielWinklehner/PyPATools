@@ -10,8 +10,9 @@ Implemented:
   extension records). Lossless for (positions [m], momenta [beta*gamma]).
 - OPAL H5hut phase-space files (.h5), read only.
 - Custom NumPy binary (.npz).
+- TraceWin .dst phase-space files (read and write; .ini not handled).
 
-Deferred (stubs): TraceWin (.dst/.ini), AIMA (.lst), OPAL H5 writing.
+Deferred (stubs): AIMA (.lst), OPAL H5 writing.
 
 Loader contract:  loader(filename, **kwargs) -> (positions (N,3) [m],
                   momenta (N,3) [beta*gamma], metadata dict)
@@ -296,14 +297,116 @@ def save_opal_h5(filename: str, positions: np.ndarray, momenta: np.ndarray,
 
 # ------------------------------------------------------------------ deferred
 
-def load_tracewin(filename: str, **kwargs):
-    raise NotImplementedError(
-        "TraceWin reading deferred (no reference reader exists; "
-        "see 'Quick and Dirty Scripts' for a partial ASCII writer)")
+# ------------------------------------------------------------------ TraceWin
+
+def read_tracewin_dst(filename: str) -> Dict:
+    """Raw content of a TraceWin .dst file.
+
+    Layout (little-endian): 2 dummy bytes, int32 number of particles, float64 beam
+    current [mA], float64 RF frequency [MHz], 1 dummy byte, then per particle six
+    float64 (x [cm], x' [rad], y [cm], y' [rad], phase [rad], kinetic energy [MeV]),
+    and finally the rest mass [MeV/c^2]. Returns x, y in m, x', y' in rad, phase in
+    rad, energy in MeV plus the header values; TraceWin's phase is omega*t relative
+    to the reference particle (positive = late).
+    """
+    with open(filename, 'rb') as fh:
+        np.fromfile(fh, dtype=np.uint8, count=2)
+        n = int(np.fromfile(fh, dtype=np.int32, count=1)[0])
+        current = float(np.fromfile(fh, dtype=np.float64, count=1)[0])
+        freq = float(np.fromfile(fh, dtype=np.float64, count=1)[0])
+        np.fromfile(fh, dtype=np.uint8, count=1)
+        data = np.fromfile(fh, dtype=np.float64, count=6 * n).reshape(n, 6)
+        mass = float(np.fromfile(fh, dtype=np.float64, count=1)[0])
+    return {'n': n, 'current_mA': current, 'freq_MHz': freq, 'mass_MeV': mass,
+            'x': 1e-2 * data[:, 0], 'xp': data[:, 1], 'y': 1e-2 * data[:, 2], 'yp': data[:, 3],
+            'phase_rad': data[:, 4], 'energy_MeV': data[:, 5]}
+
+
+def _species_for_mass(mass_mev, species=None):
+    from ..species import IonSpecies
+    if species is not None:
+        return species if not isinstance(species, str) else IonSpecies(species)
+    for name in ('H2_1+', 'proton', 'H_1-', 'electron'):
+        try:
+            cand = IonSpecies(name)
+        except Exception:  # noqa: BLE001
+            continue
+        if abs(cand.mass_mev - mass_mev) / mass_mev < 0.01:
+            return cand
+    warnings.warn(f"no species preset matches the .dst rest mass {mass_mev:.3f} MeV; using proton")
+    return IonSpecies('proton')
+
+
+def load_tracewin(filename: str, core: bool = False, species=None, **kwargs) -> Tuple[np.ndarray, np.ndarray, Dict]:
+    """Load a TraceWin .dst as (positions [m], momenta [beta*gamma], metadata).
+
+    z is the longitudinal position at the reference particle's arrival time,
+    z = -phase * beta*lambda / 2 pi with each particle's own beta (a late particle
+    sits behind the reference, at negative z). Momenta point along (x', y', 1).
+    core=True keeps the bunch core only: |phase| <= 180 deg and energy >= half the
+    median (drops unaccelerated stragglers). species: IonSpecies or preset name;
+    default: the preset whose rest mass matches the file's.
+    metadata: species, bunch_charge [C] (= I / f), bunch_freq [Hz], current_mA,
+    freq_MHz, mass_MeV, phase_rad, energy_MeV, n_file, core, status.
+    """
+    from ..global_variables import CLIGHT
+    b = read_tracewin_dst(filename)
+    e, m = b['energy_MeV'], b['mass_MeV']
+    gamma = 1.0 + e / m
+    beta = np.sqrt(1.0 - 1.0 / gamma ** 2)
+    bl = beta * CLIGHT / (b['freq_MHz'] * 1e6)
+    z = -b['phase_rad'] / (2.0 * np.pi) * bl
+    keep = np.ones(b['n'], dtype=bool)
+    if core:
+        keep = (np.abs(b['phase_rad']) <= np.pi) & (e >= 0.5 * np.median(e))
+    xp, yp = b['xp'][keep], b['yp'][keep]
+    nz = 1.0 / np.sqrt(1.0 + xp ** 2 + yp ** 2)
+    bg = (gamma * beta)[keep]
+    positions = np.column_stack([b['x'][keep], b['y'][keep], z[keep]])
+    momenta = bg[:, None] * np.column_stack([xp * nz, yp * nz, nz])
+    sp = _species_for_mass(m, species)
+    freq_hz = b['freq_MHz'] * 1e6
+    metadata = {'species': sp, 'bunch_charge': b['current_mA'] * 1e-3 / freq_hz if freq_hz > 0 else 0.0,
+                'bunch_freq': freq_hz, 'current_mA': b['current_mA'], 'freq_MHz': b['freq_MHz'],
+                'mass_MeV': m, 'phase_rad': b['phase_rad'][keep], 'energy_MeV': e[keep],
+                'n_file': b['n'], 'core': bool(core), 'status': np.ones(int(keep.sum()), dtype=int)}
+    return positions, momenta, metadata
 
 
 def save_tracewin(filename: str, positions, momenta, species_data, **metadata):
-    raise NotImplementedError("TraceWin writing deferred")
+    """Write a TraceWin .dst (the layout of read_tracewin_dst). positions [m], momenta
+    [beta*gamma]; species_data['mass_mev'] (or an IonSpecies in metadata['species'])
+    gives the rest mass; metadata['bunch_freq'] [Hz] or 'freq_MHz' the RF frequency
+    (phase = -z * 2 pi / beta*lambda); metadata['current_mA'] or 'bunch_charge' the current.
+    """
+    from ..global_variables import CLIGHT
+    pos = np.asarray(positions, dtype=float)
+    mom = np.asarray(momenta, dtype=float)
+    if species_data and 'mass_mev' in species_data:
+        mass = float(species_data['mass_mev'])
+    elif metadata.get('species') is not None:
+        mass = float(metadata['species'].mass_mev)
+    else:
+        raise ValueError("save_tracewin needs species_data['mass_mev'] or metadata['species']")
+    freq_hz = float(metadata.get('bunch_freq') or 1e6 * float(metadata.get('freq_MHz', 0.0)))
+    if freq_hz <= 0:
+        raise ValueError("save_tracewin needs the RF frequency (metadata bunch_freq [Hz] or freq_MHz)")
+    current = float(metadata.get('current_mA', 1e3 * float(metadata.get('bunch_charge', 0.0)) * freq_hz))
+    bg = np.linalg.norm(mom, axis=1)
+    gamma = np.sqrt(1.0 + bg ** 2)
+    beta = bg / gamma
+    energy = (gamma - 1.0) * mass
+    xp = mom[:, 0] / mom[:, 2]
+    yp = mom[:, 1] / mom[:, 2]
+    bl = beta * CLIGHT / freq_hz
+    phase = -pos[:, 2] * 2.0 * np.pi / bl
+    with open(filename, 'wb') as fh:
+        np.zeros(2, dtype=np.uint8).tofile(fh)
+        np.array([len(pos)], dtype=np.int32).tofile(fh)
+        np.array([current, freq_hz * 1e-6], dtype=np.float64).tofile(fh)
+        np.zeros(1, dtype=np.uint8).tofile(fh)
+        np.column_stack([1e2 * pos[:, 0], xp, 1e2 * pos[:, 1], yp, phase, energy]).astype(np.float64).tofile(fh)
+        np.array([mass], dtype=np.float64).tofile(fh)
 
 
 def load_aima(filename: str, **kwargs):

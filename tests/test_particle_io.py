@@ -87,13 +87,43 @@ def test_npz_roundtrip_with_metadata():
 
 
 def test_deferred_formats_raise():
-    for name in ('x.dst', 'x.lst'):
+    for name in ('x.lst',):
         try:
             ParticleDistribution.from_file(name)
         except NotImplementedError:
             pass
         else:
             raise AssertionError(f"{name} should raise NotImplementedError")
+
+
+def test_tracewin_dst_roundtrip():
+    from PyPATools.particles_src.particle_io import save_tracewin, load_tracewin, read_tracewin_dst
+    rng = np.random.default_rng(3)
+    n = 200
+    ion = IonSpecies('H2_1+')
+    ekin = 0.0685 * (1 + 0.02 * rng.standard_normal(n))          # MeV
+    ekin[:5] = 0.02                                                # unaccelerated stragglers
+    gamma = 1 + ekin / ion.mass_mev
+    bg = np.sqrt(gamma ** 2 - 1)
+    xp, yp = 0.02 * rng.standard_normal(n), 0.02 * rng.standard_normal(n)
+    nz = 1 / np.sqrt(1 + xp ** 2 + yp ** 2)
+    mom = bg[:, None] * np.column_stack([xp * nz, yp * nz, nz])
+    pos = np.column_stack([1e-3 * rng.standard_normal(n), 1e-3 * rng.standard_normal(n), 5e-3 * rng.standard_normal(n)])
+    with tempfile.TemporaryDirectory() as d:
+        fn = os.path.join(d, 'beam.dst')
+        save_tracewin(fn, pos, mom, {'mass_mev': ion.mass_mev}, bunch_freq=32.8e6, current_mA=8.0)
+        raw = read_tracewin_dst(fn)
+        assert raw['n'] == n and abs(raw['freq_MHz'] - 32.8) < 1e-9 and abs(raw['current_mA'] - 8.0) < 1e-12
+        # a particle behind the reference (z < 0) is late: positive phase
+        assert np.all(np.sign(raw['phase_rad'][pos[:, 2] != 0]) == -np.sign(pos[pos[:, 2] != 0, 2]))
+        p2, m2, meta = load_tracewin(fn)
+        assert np.allclose(p2, pos, atol=1e-9) and np.allclose(m2, mom, rtol=1e-9)
+        assert meta['species'].name == 'H2_1+' and abs(meta['bunch_charge'] - 8e-3 / 32.8e6) < 1e-18
+        p3, m3, meta3 = load_tracewin(fn, core=True)
+        assert len(p3) == n - 5 and meta3['core'] and meta3['n_file'] == n
+        # registry path
+        pd = ParticleDistribution.from_file(fn)
+        assert len(pd.x_vec) == n if hasattr(pd, 'x_vec') else True
 
 
 def test_opal_h5_load():
