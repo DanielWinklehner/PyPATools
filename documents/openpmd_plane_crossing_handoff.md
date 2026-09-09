@@ -55,10 +55,25 @@ and `macroWeighted` attributes like any openPMD record.
 
 ## 3. Definitions
 
-**Frame.** The spiral inflector deck frame: origin on the cyclotron axis in the median
-plane, z along the axis. The beam travels in +z through the inflector and arrives at the
-median plane z = 0; B_z is negative at the centre. In the deck's plots -z is drawn upwards
-("the beam enters from the top"). Right-handed x, y, z. SI units throughout.
+**Frame.** Two frames exist; the file says which one it uses in `PyPATools:frame_name`
+(`deck` or `machine`) and describes it in `PyPATools:frame`.
+* *deck*: the spiral inflector deck frame: origin on the cyclotron axis in the median
+  plane, z along the axis. The beam travels in +z through the inflector and arrives at the
+  median plane z = 0; B_z is negative at the centre. In the deck's plots -z is drawn
+  upwards. Right-handed x, y, z. SI units throughout.
+* *machine* (the agreed master frame, 2026-09-09): +z up towards the RFQ, the beam comes
+  down the axis (-z) and circulates counter-clockwise seen from above, +x = azimuth 0 on
+  a magnet hill, B_z < 0. It is the deck frame mirrored through the median plane: z and
+  p_z change sign, x, y, azimuths and the sense of rotation do not. Files written with
+  `--handoff-frame machine` are already transformed; the plane origin, normal and axes in
+  the attributes are transformed with them (the in-plane axes are recomputed so (u, v, n)
+  stays right-handed).
+
+**Hand-off distance 0.** With `handoff_distance_m = 0` the plane is the electrode exit
+plane itself (design exit point, normal along the design exit velocity). The particles
+then sit inside the inflector's electric fringe: the central-region tracking must add the
+inflector's static E-field (exported as a machine-frame field map next to the file) and
+its housing to its own model, which is the intended use since 2026-09-09.
 
 **Momentum.** Lab-frame momentum components in eV/c (openPMD-beamphysics convention):
 p = beta*gamma * m c. Kinetic energy = sqrt(p^2 + m^2) - m with m = `PyPATools:species_mass_mev`
