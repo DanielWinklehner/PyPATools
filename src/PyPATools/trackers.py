@@ -120,12 +120,17 @@ class Tracker:
         self._boris = str(getattr(pusher, "algorithm", "")).lower() == "boris"
 
     def run(self, pd, dt, n_steps, *, t0: float = 0.0, record_every: int = 1,
-            show_progress: bool = False, sync_back: bool = True) -> TrackerResult:
+            show_progress: bool = False, sync_back: bool = True,
+            stop_on_all_lost: bool = True) -> TrackerResult:
         """Track ``pd`` for ``n_steps`` of ``dt``.
 
         ``pd`` is a ``ParticleDistribution``; its ``x_vec``/``v_vec``/``alive``
         provide the initial state. With ``sync_back=True`` the final state is
         written back into ``pd`` (positions, momenta, alive mask).
+
+        ``stop_on_all_lost=False`` keeps stepping when no particle is alive, for
+        interactions that inject particles later (they start with ``alive`` False
+        and are switched on at their injection step).
         """
         ef, bf, pusher = self.efield, self.bfield, self.pusher
 
@@ -181,7 +186,7 @@ class Tracker:
                 steps_done = step + 1
                 break
 
-            if not np.any(active):
+            if stop_on_all_lost and not np.any(active):
                 stopped = True
                 stop_reason = "all_lost"
                 steps_done = step + 1
