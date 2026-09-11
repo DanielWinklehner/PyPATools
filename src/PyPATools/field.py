@@ -151,10 +151,30 @@ class Field(FieldBase):
         self._interpolator_backend = interpolator_backend
         self._method = method
 
-        # Unit conversion
+        # Unit conversion.
+        #
+        # NOTE: `units` has never actually rescaled anything. `_unit_scale` is
+        # stored here and carried through the pickle round-trip, but it is
+        # never applied to grid coordinates or to field values. Quietly
+        # accepting a unit that implies a conversion therefore lies to the
+        # caller -- the field comes back in whatever units the arrays were
+        # already in. Refuse those instead of converting, because converting
+        # now would silently change the meaning of every existing call site.
+        # Units that are already SI (scale 1.0) are no-ops and stay accepted.
         if units not in UNIT_SCALES:
             raise ValueError(f"Unknown unit '{units}'. Must be one of {list(UNIT_SCALES.keys())}")
         self._unit_scale = UNIT_SCALES[units]
+        if self._unit_scale != 1.0:
+            raise NotImplementedError(
+                f"Field(units={units!r}) implies a factor of {self._unit_scale} to reach "
+                f"SI, but `units` is not applied to grid coordinates or field values -- "
+                f"it is stored and never used, so the field would silently stay in the "
+                f"units the arrays were already in. Convert to SI (meters, Tesla, V/m) "
+                f"before constructing the Field. For a field-value factor use "
+                f"`scaling=`, which IS applied (by __call__ and by save_to_h5part). "
+                f"No-op units that remain accepted: "
+                f"{sorted(k for k, v in UNIT_SCALES.items() if v == 1.0)}."
+            )
 
         # Initialize field storage
         self._field = {"x": None, "y": None, "z": None}

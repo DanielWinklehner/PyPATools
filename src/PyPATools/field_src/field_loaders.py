@@ -640,8 +640,10 @@ def load_opal_midplane(filename, r_cutoff=None, scaling=1.0, cartesian_grid=True
     if not os.path.exists(filename):
         raise FileNotFoundError(f"File not found: {filename}")
 
-    if os.path.splitext(filename)[1] != ".dat":
-        raise ValueError("File extension must be '.dat'")
+    # The OPAL toolchain writes these as '<name>_CARBONCYCL.txt' as often as
+    # '.dat' (write_opal_midplane defaults to .txt), so accept both.
+    if os.path.splitext(filename)[1].lower() not in (".dat", ".txt"):
+        raise ValueError("File extension must be '.dat' or '.txt'")
 
     try:
         with open(filename, 'r') as infile:
@@ -657,8 +659,12 @@ def load_opal_midplane(filename, r_cutoff=None, scaling=1.0, cartesian_grid=True
     except Exception as e:
         raise RuntimeError(f"Error reading OPAL midplane file: {e}")
 
-    # Parse Bz values (convert kGauss to Tesla by default)
-    bz_flat = scaling * 0.1 * np.array([np.fromstring(line, sep=" ") for line in raw_data]).flatten()
+    # Parse Bz values (convert kGauss to Tesla by default).
+    # Concatenate rather than stack: the last line is short whenever the value
+    # count is not a multiple of the line width, which np.array() would reject
+    # as a ragged nested sequence. Blank trailing lines are dropped.
+    _rows = [np.fromstring(line, sep=" ") for line in raw_data if line.strip()]
+    bz_flat = scaling * 0.1 * (np.concatenate(_rows) if _rows else np.array([]))
 
     expected_points = nth * nr
     if len(bz_flat) != expected_points:
