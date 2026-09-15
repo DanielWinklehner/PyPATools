@@ -28,6 +28,7 @@ import numpy as np
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import gmres, LinearOperator
 import pyamg
+import os
 import time
 import logging
 from dataclasses import dataclass
@@ -63,7 +64,7 @@ class PyAMGSolverConfig:
     domain_origin: Tuple[float, float, float] = (0.0, 0.0, 0.0)  # box CENTRE in m
 
     # AMG parameters
-    amg_strength: float = 0.25
+    amg_strength: float = float(os.environ.get("PYAMG_STRENGTH", "0.08"))   # 2026-09-15 audit 6.3: 0.25 with the symmetric measure marked every 7-point connection weak (1 real level); 0.08 builds 5 levels, identical solutions, PYAMG_STRENGTH overrides
     amg_max_levels: int = 10
 
     # Solver parameters
@@ -344,11 +345,15 @@ class PyAMGPoissonSolver:
                     i_pos = i + 1
                     i_neg = i - 1
 
+                    # Shortley-Weller distances to a conductor neighbour: floored at h * 1e-3 (a sliver) and
+                    # CAPPED at h (2026-09-15 audit 6.3: a failed ray cast returns the 1e30 sentinel, which
+                    # collapsed 2 / (h_pos h_neg) to zero and silently dropped that axis from the row; the
+                    # conductor neighbour is at most one cell away, so h is the right fallback)
                     # +X Neighbor
                     if i_pos < self.nx:
                         idx_pos = self._ijk_to_idx(i_pos, j, k)
                         is_cond = self.cell_type[idx_pos] == CellType.CONDUCTOR
-                        hx_pos = max(self.boundary_distances[idx_old, 0], self.hx * 1e-3) if is_cond else self.hx
+                        hx_pos = min(max(self.boundary_distances[idx_old, 0], self.hx * 1e-3), self.hx) if is_cond else self.hx
                     else:
                         is_cond = False
                         hx_pos = self.hx
@@ -358,7 +363,7 @@ class PyAMGPoissonSolver:
                     if i_neg >= 0:
                         idx_neg = self._ijk_to_idx(i_neg, j, k)
                         is_cond_neg = self.cell_type[idx_neg] == CellType.CONDUCTOR
-                        hx_neg = max(self.boundary_distances[idx_old, 1], self.hx * 1e-3) if is_cond_neg else self.hx
+                        hx_neg = min(max(self.boundary_distances[idx_old, 1], self.hx * 1e-3), self.hx) if is_cond_neg else self.hx
                     else:
                         is_cond_neg = False
                         hx_neg = self.hx
@@ -383,7 +388,7 @@ class PyAMGPoissonSolver:
                     if j_pos < self.ny:
                         idx_pos = self._ijk_to_idx(i, j_pos, k)
                         is_cond = self.cell_type[idx_pos] == CellType.CONDUCTOR
-                        hy_pos = max(self.boundary_distances[idx_old, 2], self.hy * 1e-3) if is_cond else self.hy
+                        hy_pos = min(max(self.boundary_distances[idx_old, 2], self.hy * 1e-3), self.hy) if is_cond else self.hy
                     else:
                         is_cond = False
                         hy_pos = self.hy
@@ -393,7 +398,7 @@ class PyAMGPoissonSolver:
                     if j_neg >= 0:
                         idx_neg = self._ijk_to_idx(i, j_neg, k)
                         is_cond_neg = self.cell_type[idx_neg] == CellType.CONDUCTOR
-                        hy_neg = max(self.boundary_distances[idx_old, 3], self.hy * 1e-3) if is_cond_neg else self.hy
+                        hy_neg = min(max(self.boundary_distances[idx_old, 3], self.hy * 1e-3), self.hy) if is_cond_neg else self.hy
                     else:
                         is_cond_neg = False
                         hy_neg = self.hy
@@ -418,7 +423,7 @@ class PyAMGPoissonSolver:
                     if k_pos < self.nz:
                         idx_pos = self._ijk_to_idx(i, j, k_pos)
                         is_cond = self.cell_type[idx_pos] == CellType.CONDUCTOR
-                        hz_pos = max(self.boundary_distances[idx_old, 4], self.hz * 1e-3) if is_cond else self.hz
+                        hz_pos = min(max(self.boundary_distances[idx_old, 4], self.hz * 1e-3), self.hz) if is_cond else self.hz
                     else:
                         is_cond = False
                         hz_pos = self.hz
@@ -428,7 +433,7 @@ class PyAMGPoissonSolver:
                     if k_neg >= 0:
                         idx_neg = self._ijk_to_idx(i, j, k_neg)
                         is_cond_neg = self.cell_type[idx_neg] == CellType.CONDUCTOR
-                        hz_neg = max(self.boundary_distances[idx_old, 5], self.hz * 1e-3) if is_cond_neg else self.hz
+                        hz_neg = min(max(self.boundary_distances[idx_old, 5], self.hz * 1e-3), self.hz) if is_cond_neg else self.hz
                     else:
                         is_cond_neg = False
                         hz_neg = self.hz
@@ -815,10 +820,16 @@ class PyAMGPoissonSolver:
 
         rho_gpu = cp.zeros(self.n_dofs, dtype=cp.float64)
 
-        # Grid indices
-        px_grid = (particles_gpu[:, 0] - self.x0) / self.hx
-        py_grid = (particles_gpu[:, 1] - self.y0) / self.hy
-        pz_grid = (particles_gpu[:, 2] - self.z0) / self.hz
+        # Grid coordinates in units of cells, measured from node 0. The nodes are the CELL CENTRES
+        # (_generate_mesh: node i at x0 + h/2 + i h, and the field is gathered back on those same
+        # nodes), so node i sits at grid coordinate i only after the half-cell offset below is
+        # removed. 2026-09-15 audit 6.2: without it every deposited charge cloud was shifted by
+        # (+hx/2, +hy/2, +hz/2) relative to the particles while E was read at the true positions.
+        # Clamped to the node range BEFORE the weights are formed, so a particle outside the box
+        # gets bounded weights (it was previously given unbounded / negative ones).
+        px_grid = cp.clip((particles_gpu[:, 0] - self.x0) / self.hx - 0.5, 0.0, self.nx - 1.0)
+        py_grid = cp.clip((particles_gpu[:, 1] - self.y0) / self.hy - 0.5, 0.0, self.ny - 1.0)
+        pz_grid = cp.clip((particles_gpu[:, 2] - self.z0) / self.hz - 0.5, 0.0, self.nz - 1.0)
 
         # CIC deposition
         ix = cp.floor(px_grid).astype(cp.int32)
@@ -862,9 +873,10 @@ class PyAMGPoissonSolver:
 
         rho = np.zeros(self.n_dofs, dtype=np.float64)
 
-        px_grid = (particles[:, 0] - self.x0) / self.hx
-        py_grid = (particles[:, 1] - self.y0) / self.hy
-        pz_grid = (particles[:, 2] - self.z0) / self.hz
+        # nodes are the cell centres: node i at x0 + h/2 + i h (see the GPU path, audit 6.2 of 2026-09-15)
+        px_grid = (particles[:, 0] - self.x0) / self.hx - 0.5
+        py_grid = (particles[:, 1] - self.y0) / self.hy - 0.5
+        pz_grid = (particles[:, 2] - self.z0) / self.hz - 0.5
 
         # Clamp to valid range
         px_grid = np.clip(px_grid, 0, self.nx - 1)

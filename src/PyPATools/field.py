@@ -16,7 +16,7 @@ import pickle
 import os
 from typing import Optional, Union, Tuple, Dict, List
 from abc import ABC, abstractmethod
-from .field_src.interpolators import get_interpolator
+from .field_src.interpolators import get_interpolator, interp3d_components
 
 try:
     from numba import njit, prange
@@ -611,6 +611,11 @@ class Field(FieldBase):
         field_values : np.ndarray(M, 3)
             Field components [Fx, Fy, Fz] for M points
         """
+        # 2026-09-15: three numba components on one grid are evaluated in a single pass (one cell search per
+        # point instead of three); anything else takes the per-component path below
+        fused = interp3d_components(self._field["x"], self._field["y"], self._field["z"], pts)
+        if fused is not None:
+            return self._scaling * fused
         fx = self._scaling * self._field["x"](pts)
         fy = self._scaling * self._field["y"](pts)
         fz = self._scaling * self._field["z"](pts)

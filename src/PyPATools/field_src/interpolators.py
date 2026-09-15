@@ -259,6 +259,92 @@ if HAS_NUMBA:
                                          grid_x, grid_y, grid_z, values, fill_value)
         return result
 
+    @njit(cache=True, fastmath=True)
+    def _trilinear_cell(values, i, j, k, tx, ty, tz):
+        """The 8-node trilinear combination of _interp3d_single, in the same order of operations."""
+        c000 = values[i, j, k]
+        c100 = values[i + 1, j, k]
+        c010 = values[i, j + 1, k]
+        c110 = values[i + 1, j + 1, k]
+        c001 = values[i, j, k + 1]
+        c101 = values[i + 1, j, k + 1]
+        c011 = values[i, j + 1, k + 1]
+        c111 = values[i + 1, j + 1, k + 1]
+
+        c00 = c000 * (1.0 - tx) + c100 * tx
+        c01 = c001 * (1.0 - tx) + c101 * tx
+        c10 = c010 * (1.0 - tx) + c110 * tx
+        c11 = c011 * (1.0 - tx) + c111 * tx
+
+        c0 = c00 * (1.0 - ty) + c10 * ty
+        c1 = c01 * (1.0 - ty) + c11 * ty
+
+        return c0 * (1.0 - tz) + c1 * tz
+
+    @njit(parallel=True, cache=True, fastmath=True, nogil=True)
+    def _interp3d_batch3(x_arr, y_arr, z_arr, grid_x, grid_y, grid_z, vx, vy, vz, fill_value):
+        """Three components of one 3D grid at once: one cell search and one set of weights per point, three
+        gathers (2026-09-15: the per-component path repeated the three binary searches and the weights for every
+        component; field evaluation is half of a 3D multiparticle tracking step)."""
+        n = len(x_arr)
+        result = np.empty((n, 3), dtype=np.float64)
+        nx, ny, nz = len(grid_x), len(grid_y), len(grid_z)
+        for p in prange(n):
+            x = x_arr[p]
+            y = y_arr[p]
+            z = z_arr[p]
+            if (x < grid_x[0] or x > grid_x[nx - 1] or
+                    y < grid_y[0] or y > grid_y[ny - 1] or
+                    z < grid_z[0] or z > grid_z[nz - 1]):
+                result[p, 0] = fill_value
+                result[p, 1] = fill_value
+                result[p, 2] = fill_value
+                continue
+            i = _searchsorted_numba(grid_x, x)
+            j = _searchsorted_numba(grid_y, y)
+            k = _searchsorted_numba(grid_z, z)
+            i = max(0, min(i, nx - 2))
+            j = max(0, min(j, ny - 2))
+            k = max(0, min(k, nz - 2))
+            tx = (x - grid_x[i]) / (grid_x[i + 1] - grid_x[i])
+            ty = (y - grid_y[j]) / (grid_y[j + 1] - grid_y[j])
+            tz = (z - grid_z[k]) / (grid_z[k + 1] - grid_z[k])
+            tx = max(0.0, min(tx, 1.0))
+            ty = max(0.0, min(ty, 1.0))
+            tz = max(0.0, min(tz, 1.0))
+            result[p, 0] = _trilinear_cell(vx, i, j, k, tx, ty, tz)
+            result[p, 1] = _trilinear_cell(vy, i, j, k, tx, ty, tz)
+            result[p, 2] = _trilinear_cell(vz, i, j, k, tx, ty, tz)
+        return result
+
+
+def interp3d_components(ia, ib, ic, pts):
+    """(M, 3) values of three NumbaInterpolator components that share one 3D grid, evaluated with a single cell
+    search per point (``_interp3d_batch3``); None when the fused path does not apply (another backend, mixed
+    grids, bounds checking, a single point - which keeps the cached single-point path). Used by
+    ``Field._get_field_3d``; falls back to the per-component evaluation whenever it returns None."""
+    if not HAS_NUMBA:
+        return None
+    comps = (ia, ib, ic)
+    for it in comps:
+        if not isinstance(it, NumbaInterpolator) or it.ndim != 3 or it.bounds_error:
+            return None
+    g = ia._grid
+    for it in (ib, ic):
+        for d in range(3):
+            a, b = g[d], it._grid[d]
+            if a is not b and (a.shape != b.shape or a[0] != b[0] or a[-1] != b[-1]):
+                return None
+        if it.fill_value != ia.fill_value:
+            return None
+    pts = np.asarray(pts, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 3 or pts.shape[0] < 2:
+        return None
+    x = np.ascontiguousarray(pts[:, 0])
+    y = np.ascontiguousarray(pts[:, 1])
+    z = np.ascontiguousarray(pts[:, 2])
+    return _interp3d_batch3(x, y, z, g[0], g[1], g[2], ia._values, ib._values, ic._values, ia.fill_value)
+
 # ============================================================================
 # Backend 1: NumbaInterpolator (Custom Numba JIT)
 # ============================================================================
