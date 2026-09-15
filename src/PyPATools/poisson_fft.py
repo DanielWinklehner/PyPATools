@@ -62,8 +62,10 @@ Approximations (stated deliberately)
 GPU
 ---
 ``use_gpu=True`` runs deposition, the FFTs, the gradient and the gather on
-the GPU with CuPy (input and output stay NumPy). CPU: numba kernels for
-deposit / gather / gradient, scipy.fft with all workers for the transforms.
+the GPU with CuPy (input and output stay NumPy): fused ElementwiseKernels for
+deposit (atomic adds) and gather, cuFFT plans cached per window shape next to
+the Green spectrum. CPU: numba kernels for deposit / gather / gradient,
+scipy.fft with all workers for the transforms.
 
 Usage
 -----
@@ -89,11 +91,54 @@ from .global_variables import EPS0
 
 try:
     import cupy as cp
+    import cupyx.scipy.fft as cu_fft
 
     CUPY_AVAILABLE = True
 except ImportError:                                                        # pragma: no cover
     cp = None
+    cu_fft = None
     CUPY_AVAILABLE = False
+
+
+# Fused GPU kernels: one launch each for the CIC deposit (atomic adds) and the
+# trilinear gather, instead of ~100 small cupy operations per solve. Same index
+# and clamping conventions as the numba kernels above. Built lazily on first use.
+_GPU_KERNELS = {}
+
+
+def _gpu_kernels():
+    if not _GPU_KERNELS:
+        _GPU_KERNELS['deposit'] = cp.ElementwiseKernel(
+            'float64 px, float64 py, float64 pz, float64 q, int64 nx, int64 ny, int64 nz',
+            'raw float64 rho',                     # accumulated in place (raw inputs are const)
+            '''
+            long long ix = (long long)floor(px), iy = (long long)floor(py), iz = (long long)floor(pz);
+            double fx = px - ix, fy = py - iy, fz = pz - iz;
+            ix = min(max(ix, 0LL), nx - 2); iy = min(max(iy, 0LL), ny - 2); iz = min(max(iz, 0LL), nz - 2);
+            for (int dx = 0; dx < 2; ++dx) { double wx = dx ? fx : 1.0 - fx;
+              for (int dy = 0; dy < 2; ++dy) { double wy = dy ? fy : 1.0 - fy;
+                for (int dz = 0; dz < 2; ++dz) { double wz = dz ? fz : 1.0 - fz;
+                  long long idx = (ix + dx) * (ny * nz) + (iy + dy) * nz + (iz + dz);
+                  atomicAdd(&rho[idx], q * wx * wy * wz);
+            } } }
+            ''', 'pypatools_cic_deposit')
+        _GPU_KERNELS['gather'] = cp.ElementwiseKernel(
+            'float64 px, float64 py, float64 pz, raw float64 Ex, raw float64 Ey, raw float64 Ez, int64 nx, int64 ny, int64 nz',
+            'float64 ex, float64 ey, float64 ez',
+            '''
+            long long ix = (long long)floor(px), iy = (long long)floor(py), iz = (long long)floor(pz);
+            double fx = px - ix, fy = py - iy, fz = pz - iz;
+            ix = min(max(ix, 0LL), nx - 2); iy = min(max(iy, 0LL), ny - 2); iz = min(max(iz, 0LL), nz - 2);
+            ex = 0.0; ey = 0.0; ez = 0.0;
+            for (int dx = 0; dx < 2; ++dx) { double wx = dx ? fx : 1.0 - fx;
+              for (int dy = 0; dy < 2; ++dy) { double wy = dy ? fy : 1.0 - fy;
+                for (int dz = 0; dz < 2; ++dz) { double wz = dz ? fz : 1.0 - fz;
+                  long long idx = (ix + dx) * (ny * nz) + (iy + dy) * nz + (iz + dz);
+                  double w = wx * wy * wz;
+                  ex += w * Ex[idx]; ey += w * Ey[idx]; ez += w * Ez[idx];
+            } } }
+            ''', 'pypatools_trilinear_gather')
+    return _GPU_KERNELS
 
 # The CIC deposition and the E = -grad(phi) kernels are verbatim copies of the
 # PyAMG solver's (poisson_amg.PyAMGPoissonSolver._cic_deposit_numba and
@@ -286,7 +331,15 @@ class FFTPoissonSolver:
     cache_size : int
         Number of Green's-function spectra kept (one per distinct window
         shape / spacing; each is (2nx)(2ny)(nz+1) complex128, i.e. up to a few
-        hundred MB for a window at ``max_cells``).
+        hundred MB for a window at ``max_cells``; on the GPU the cuFFT plans
+        of that shape are kept with it).
+    window_quantile : float
+        0 (default): the window spans the exact bounding box of the particles.
+        q > 0: it spans the [q, 1 - q] quantile range per axis and the
+        stragglers outside it neither deposit nor receive a field (E = 0) -
+        a handful of far-away particles must not blow the window (and the
+        cell size, via ``max_cells``) up for the whole bunch. 1e-3 excludes
+        at most ~0.6 % of the particles.
     verbose : bool
         Log one line per solve (logging.INFO).
 
@@ -307,8 +360,12 @@ class FFTPoissonSolver:
                  min_cells: int = 8,
                  relativistic: bool = False,
                  cache_size: int = 4,
+                 window_quantile: float = 0.0,
                  verbose: bool = False):
         h = np.atleast_1d(np.asarray(h, dtype=float))
+        if not 0.0 <= window_quantile < 0.5:
+            raise ValueError("window_quantile must be in [0, 0.5)")
+        self.window_quantile = float(window_quantile)
         if h.size == 1:
             h = np.repeat(h, 3)
         if h.shape != (3,) or np.any(h <= 0.0):
@@ -372,12 +429,23 @@ class FFTPoissonSolver:
             shape = []
             for a in range(3):
                 n_prev = prev_shape[a] if (prev_shape is not None and np.allclose(prev_h, h)) else None
-                if n_prev is not None and n_prev >= n_needed[a] and n_needed[a] >= self.shrink_factor * n_prev:
-                    shape.append(int(n_prev))
+                if n_prev is None:
+                    shape.append(self._fft_len(int(n_needed[a])))                  # first fit: exact
+                elif n_prev >= n_needed[a] and n_needed[a] >= self.shrink_factor * n_prev:
+                    shape.append(int(n_prev))                                       # still fits: keep
+                elif n_prev < n_needed[a]:
+                    shape.append(self._fft_len(int(np.ceil(self.growth * n_needed[a]))))   # grow with headroom
                 else:
-                    shape.append(self._fft_len(int(np.ceil(self.growth * n_needed[a]))))
+                    shape.append(self._fft_len(int(n_needed[a])))                  # shrunk a lot: refit
             shape = tuple(shape)
             if int(np.prod(shape)) <= self.max_cells:
+                break
+            # too big with the kept / headroom axes: an exact refit at this spacing
+            # comes before coarsening (a kept axis from a formerly larger bunch must
+            # not push the whole window into a coarser cell size)
+            exact = tuple(self._fft_len(int(n)) for n in n_needed)
+            if int(np.prod(exact)) <= self.max_cells:
+                shape = exact
                 break
             h = h * 1.25
             if not self._coarsen_warned:
@@ -393,54 +461,49 @@ class FFTPoissonSolver:
         return h, shape, origin
 
     def _green_spectrum(self, shape, h):
-        """rfftn of the doubled-grid Green's function, cached by (shape, h)."""
+        """rfftn of the doubled-grid Green's function, cached by (shape, h).
+
+        On the GPU the entry also carries the two cuFFT plans (R2C forward,
+        C2R inverse) for this doubled shape: CuPy's own plan cache holds 16
+        plans and a moving window with a few live shapes thrashes it, at
+        ~10 ms per plan creation - as much as the FFTs themselves.
+        Returns (G_hat, plan_r2c, plan_c2r); the plans are None on the CPU.
+        """
         key = (tuple(int(v) for v in shape), tuple(float(v) for v in h))
-        G_hat = self._green_cache.get(key)
-        if G_hat is None:
+        entry = self._green_cache.get(key)
+        if entry is None:
             t0 = time.perf_counter()
             xp = self.xp
             G = hockney_green_function(shape, h, xp=xp)
             if self.use_gpu:
-                G_hat = cp.fft.rfftn(G)
+                plan_r2c = cu_fft.get_fft_plan(G, axes=(0, 1, 2), value_type='R2C')
+                G_hat = cu_fft.rfftn(G, plan=plan_r2c)
+                plan_c2r = cu_fft.get_fft_plan(G_hat, shape=G.shape, axes=(0, 1, 2), value_type='C2R')
+                entry = (G_hat, plan_r2c, plan_c2r)
             else:
-                G_hat = sp_fft.rfftn(G, workers=-1)
+                entry = (sp_fft.rfftn(G, workers=-1), None, None)
             del G
-            self._green_cache[key] = G_hat
+            self._green_cache[key] = entry
             self._green_order.append(key)
-            evicted = False
             while len(self._green_order) > self.cache_size:
+                # evicted device arrays go back to CuPy's pool, which reuses them
+                # (and frees them itself if an allocation would otherwise fail)
                 self._green_cache.pop(self._green_order.pop(0), None)
-                evicted = True
-            if evicted and self.use_gpu:
-                # give the evicted spectra (up to hundreds of MB each) back to the device
-                cp.get_default_memory_pool().free_all_blocks()
             self.green_recomputes += 1
             self.last_timing['green_s'] = time.perf_counter() - t0
         else:
             self.last_timing['green_s'] = 0.0
-        return G_hat
+        return entry
 
     # ------------------------------------------------------------------ pieces
     def _deposit(self, pos, q, shape, origin, h):
         """CIC charge [C] per node, flat (nx*ny*nz,) on the device."""
         nx, ny, nz = shape
         if self.use_gpu:
-            p = cp.asarray(pos, dtype=cp.float64)
-            qq = cp.asarray(q, dtype=cp.float64)
-            g = (p - cp.asarray(origin)) / cp.asarray(h)
-            i0 = cp.clip(cp.floor(g[:, 0]).astype(cp.int64), 0, nx - 2)
-            i1 = cp.clip(cp.floor(g[:, 1]).astype(cp.int64), 0, ny - 2)
-            i2 = cp.clip(cp.floor(g[:, 2]).astype(cp.int64), 0, nz - 2)
-            fx, fy, fz = g[:, 0] - i0, g[:, 1] - i1, g[:, 2] - i2
+            g = (cp.asarray(pos, dtype=cp.float64) - cp.asarray(origin)) / cp.asarray(h)
+            g = cp.ascontiguousarray(g)
             rho = cp.zeros(nx * ny * nz, dtype=cp.float64)
-            for dix in (0, 1):
-                wx = fx if dix else 1.0 - fx
-                for diy in (0, 1):
-                    wy = fy if diy else 1.0 - fy
-                    for diz in (0, 1):
-                        wz = fz if diz else 1.0 - fz
-                        idx = (i0 + dix) * (ny * nz) + (i1 + diy) * nz + (i2 + diz)
-                        cp.add.at(rho, idx, qq * wx * wy * wz)
+            _gpu_kernels()['deposit'](g[:, 0], g[:, 1], g[:, 2], cp.asarray(q, dtype=cp.float64), nx, ny, nz, rho)
             return rho
         pos = np.ascontiguousarray(pos, dtype=np.float64)
         px = (pos[:, 0] - origin[0]) / h[0]
@@ -454,11 +517,13 @@ class FFTPoissonSolver:
         """phi [V] on the physical window from the node charges (Hockney convolution)."""
         nx, ny, nz = shape
         xp = self.xp
-        G_hat = self._green_spectrum(shape, h)
+        G_hat, plan_r2c, plan_c2r = self._green_spectrum(shape, h)
         rho_pad = xp.zeros((2 * nx, 2 * ny, 2 * nz), dtype=xp.float64)
         rho_pad[:nx, :ny, :nz] = rho_flat.reshape(nx, ny, nz)
         if self.use_gpu:
-            phi = cp.fft.irfftn(cp.fft.rfftn(rho_pad) * G_hat, s=rho_pad.shape)
+            spec = cu_fft.rfftn(rho_pad, plan=plan_r2c)
+            spec *= G_hat
+            phi = cu_fft.irfftn(spec, s=rho_pad.shape, plan=plan_c2r)
         else:
             phi = sp_fft.irfftn(sp_fft.rfftn(rho_pad, workers=-1) * G_hat, s=rho_pad.shape, workers=-1)
         phi = phi[:nx, :ny, :nz]
@@ -490,26 +555,10 @@ class FFTPoissonSolver:
         Ex, Ey, Ez = self._E
         nx, ny, nz = self.shape
         if self.use_gpu:
-            p = cp.asarray(pos, dtype=cp.float64)
-            g = (p - cp.asarray(self.origin)) / cp.asarray(self.h)
-            i0 = cp.clip(cp.floor(g[:, 0]).astype(cp.int64), 0, nx - 2)
-            i1 = cp.clip(cp.floor(g[:, 1]).astype(cp.int64), 0, ny - 2)
-            i2 = cp.clip(cp.floor(g[:, 2]).astype(cp.int64), 0, nz - 2)
-            fx, fy, fz = g[:, 0] - i0, g[:, 1] - i1, g[:, 2] - i2
-            out = cp.zeros((len(p), 3), dtype=cp.float64)
-            Exf, Eyf, Ezf = Ex.ravel(), Ey.ravel(), Ez.ravel()
-            for dix in (0, 1):
-                wx = fx if dix else 1.0 - fx
-                for diy in (0, 1):
-                    wy = fy if diy else 1.0 - fy
-                    for diz in (0, 1):
-                        wz = fz if diz else 1.0 - fz
-                        idx = (i0 + dix) * (ny * nz) + (i1 + diy) * nz + (i2 + diz)
-                        w = wx * wy * wz
-                        out[:, 0] += w * Exf[idx]
-                        out[:, 1] += w * Eyf[idx]
-                        out[:, 2] += w * Ezf[idx]
-            return cp.asnumpy(out)
+            g = (cp.asarray(pos, dtype=cp.float64) - cp.asarray(self.origin)) / cp.asarray(self.h)
+            g = cp.ascontiguousarray(g)
+            ex, ey, ez = _gpu_kernels()['gather'](g[:, 0], g[:, 1], g[:, 2], Ex, Ey, Ez, nx, ny, nz)
+            return cp.asnumpy(cp.stack([ex, ey, ez], axis=1))
         pos = np.ascontiguousarray(pos, dtype=np.float64)
         px = (pos[:, 0] - self.origin[0]) / self.h[0]
         py = (pos[:, 1] - self.origin[1]) / self.h[1]
@@ -539,12 +588,26 @@ class FFTPoissonSolver:
         if not np.all(np.isfinite(pos)):
             raise ValueError("non-finite particle positions")
 
-        lo, hi = pos.min(axis=0), pos.max(axis=0)
+        # window from the bunch extent; with window_quantile > 0 the extent is
+        # the [q, 1-q] quantile range per axis and the stragglers outside it
+        # neither deposit nor receive a field (E = 0): a few far-away particles
+        # must not blow the window up for everybody else
+        inside = None
+        if self.window_quantile > 0.0 and len(pos) > 2:
+            lo = np.quantile(pos, self.window_quantile, axis=0)
+            hi = np.quantile(pos, 1.0 - self.window_quantile, axis=0)
+            inside = np.all((pos >= lo) & (pos <= hi), axis=1)
+            if inside.all():
+                inside = None
+        else:
+            lo, hi = pos.min(axis=0), pos.max(axis=0)
         h, shape, origin = self._fit_window(lo, hi)
         self.h, self.shape, self.origin = h, shape, origin
+        pos_in = pos if inside is None else pos[inside]
+        q_in = q if inside is None else q[inside]
         t_win = time.perf_counter()
 
-        rho = self._deposit(pos, q, shape, origin, h)
+        rho = self._deposit(pos_in, q_in, shape, origin, h)
         t_dep = time.perf_counter()
 
         self._phi = self._potential(rho, shape, h)
@@ -553,7 +616,11 @@ class FFTPoissonSolver:
         self._E = self._gradient(self._phi, h)
         t_grad = time.perf_counter()
 
-        E = self._gather(pos)
+        if inside is None:
+            E = self._gather(pos)
+        else:
+            E = np.zeros((len(pos), 3), dtype=np.float64)
+            E[inside] = self._gather(pos_in)
         t_end = time.perf_counter()
 
         self.n_solves += 1
@@ -562,6 +629,7 @@ class FFTPoissonSolver:
             'window_s': t_win - t_start, 'deposit_s': t_dep - t_win, 'potential_s': t_phi - t_dep,
             'gradient_s': t_grad - t_phi, 'gather_s': t_end - t_grad, 'total_s': t_end - t_start,
             'shape': tuple(int(v) for v in shape), 'h_m': tuple(float(v) for v in h), 'n_particles': int(len(pos)),
+            'n_excluded': 0 if inside is None else int((~inside).sum()),
         })
         if self.verbose:
             logging.info(
@@ -656,6 +724,7 @@ class FFTPoissonSolver:
             'last_shape': tuple(int(v) for v in self.shape) if self.shape is not None else None,
             'last_h_m': tuple(float(v) for v in self.h),
             'pad_cells': self.pad_cells,
+            'window_quantile': self.window_quantile,
             'gpu': bool(self.use_gpu),
             'relativistic': bool(self.relativistic),
         }
