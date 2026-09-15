@@ -12,6 +12,9 @@ Supported Algorithms:
     - yoshida: 4th-order symplectic (non-relativistic)
     - vay_rel: Relativistic Vay pusher (Vay, Phys. Plasmas 2008)
     - rk4_rel: Relativistic 4th-order Runge-Kutta
+    - boris_rel: Relativistic Boris in synchronized drift-kick-drift form (one field
+      evaluation per step at the half-step position; r and v stay on the same clock,
+      so no staggering is needed and the hooks / RF backtracks see a plain state)
     - yoshida_rel: Relativistic 4th-order symplectic
 
 Author: PyPATools Development Team
@@ -410,6 +413,98 @@ def position_update_batch(r_array, v_array, dt):
     return r_new_array
 
 
+@njit(fastmath=True, cache=True)
+def boris_rel_kick_single(v, efield, bfield, dt, q_over_m):
+    """Relativistic Boris momentum update over dt with E and B held fixed.
+
+    u = gamma v.  u- = u + (q/m) E dt/2;  rotation by t = (q/m) B dt / (2 gamma-),
+    s = 2 t / (1 + t^2);  u+ = u' rotated;  u_new = u+ + (q/m) E dt/2;  v_new = u_new / gamma_new.
+    Same force sign convention as the other kernels (q (E + v x B)). Scalar arithmetic only,
+    so the batch loop below allocates nothing per particle."""
+    c2 = CLIGHT * CLIGHT
+    vx, vy, vz = v[0], v[1], v[2]
+    b2 = (vx * vx + vy * vy + vz * vz) / c2
+    if b2 >= 0.9999:
+        b2 = 0.9999
+    g = 1.0 / np.sqrt(1.0 - b2)
+    he = 0.5 * q_over_m * dt
+    ux = g * vx + he * efield[0]
+    uy = g * vy + he * efield[1]
+    uz = g * vz + he * efield[2]
+    gm = np.sqrt(1.0 + (ux * ux + uy * uy + uz * uz) / c2)
+    f = he / gm
+    tx, ty, tz = f * bfield[0], f * bfield[1], f * bfield[2]
+    t2 = tx * tx + ty * ty + tz * tz
+    sf = 2.0 / (1.0 + t2)
+    sx, sy, sz = sf * tx, sf * ty, sf * tz
+    # u' = u- + u- x t
+    px = ux + (uy * tz - uz * ty)
+    py = uy + (uz * tx - ux * tz)
+    pz = uz + (ux * ty - uy * tx)
+    # u+ = u- + u' x s
+    ux = ux + (py * sz - pz * sy)
+    uy = uy + (pz * sx - px * sz)
+    uz = uz + (px * sy - py * sx)
+    ux += he * efield[0]
+    uy += he * efield[1]
+    uz += he * efield[2]
+    gn = np.sqrt(1.0 + (ux * ux + uy * uy + uz * uz) / c2)
+    out = np.empty(3)
+    out[0] = ux / gn
+    out[1] = uy / gn
+    out[2] = uz / gn
+    return out
+
+
+@njit(parallel=True, fastmath=True, nogil=True, cache=True)
+def boris_rel_dkd_batch(r_half_array, v_array, efield_array, bfield_array, dt_array, q_over_m):
+    """Synchronized relativistic Boris, drift-kick-drift: the caller has drifted to
+    r_half = r + v dt/2 and evaluated E, B there; this kicks u over the full dt and drifts
+    the second half with the new velocity. Per-particle dt (negative for backtracks).
+    Returns (r_new, v_new)."""
+    M = v_array.shape[0]
+    r_new = np.empty_like(r_half_array)
+    v_new = np.empty_like(v_array)
+    c2 = CLIGHT * CLIGHT
+    for i in prange(M):
+        dt = dt_array[i]
+        vx, vy, vz = v_array[i, 0], v_array[i, 1], v_array[i, 2]
+        b2 = (vx * vx + vy * vy + vz * vz) / c2
+        if b2 >= 0.9999:
+            b2 = 0.9999
+        g = 1.0 / np.sqrt(1.0 - b2)
+        he = 0.5 * q_over_m * dt
+        ex, ey, ez = efield_array[i, 0], efield_array[i, 1], efield_array[i, 2]
+        ux = g * vx + he * ex
+        uy = g * vy + he * ey
+        uz = g * vz + he * ez
+        gm = np.sqrt(1.0 + (ux * ux + uy * uy + uz * uz) / c2)
+        f = he / gm
+        tx, ty, tz = f * bfield_array[i, 0], f * bfield_array[i, 1], f * bfield_array[i, 2]
+        t2 = tx * tx + ty * ty + tz * tz
+        sf = 2.0 / (1.0 + t2)
+        sx, sy, sz = sf * tx, sf * ty, sf * tz
+        px = ux + (uy * tz - uz * ty)
+        py = uy + (uz * tx - ux * tz)
+        pz = uz + (ux * ty - uy * tx)
+        ux = ux + (py * sz - pz * sy)
+        uy = uy + (pz * sx - px * sz)
+        uz = uz + (px * sy - py * sx)
+        ux += he * ex
+        uy += he * ey
+        uz += he * ez
+        gn = np.sqrt(1.0 + (ux * ux + uy * uy + uz * uz) / c2)
+        vnx, vny, vnz = ux / gn, uy / gn, uz / gn
+        v_new[i, 0] = vnx
+        v_new[i, 1] = vny
+        v_new[i, 2] = vnz
+        hd = 0.5 * dt
+        r_new[i, 0] = r_half_array[i, 0] + hd * vnx
+        r_new[i, 1] = r_half_array[i, 1] + hd * vny
+        r_new[i, 2] = r_half_array[i, 2] + hd * vnz
+    return r_new, v_new
+
+
 # NumPy fallback versions (if Numba unavailable)
 def rk4_rel_dbetagamma_dt_batch_numpy(v_array, efield_array, bfield_array, q_over_m):
     """NumPy vectorized version of relativistic RK4 derivative (fallback)."""
@@ -453,6 +548,9 @@ class Pusher:
         - 'vay_rel': Relativistic Vay pusher
         - 'rk4_rel': Relativistic RK4
         - 'yoshida_rel': Relativistic symplectic
+        - 'boris_rel': Relativistic Boris, synchronized drift-kick-drift (2026-09-15):
+          ONE field evaluation per step (RK4: four), second order, time-reversible,
+          r and v on the same clock (no Tracker staggering, hooks and backtracks unchanged)
     use_numba : bool
         Use Numba JIT compilation (default: True if available)
 
@@ -469,7 +567,7 @@ class Pusher:
     """
 
     ALGORITHMS = ['leapfrog', 'boris', 'rk4', 'yoshida',
-                  'vay_rel', 'rk4_rel', 'yoshida_rel']
+                  'vay_rel', 'rk4_rel', 'yoshida_rel', 'boris_rel']
 
     def __init__(self, ion, algorithm: str = 'boris',
                  use_numba: bool = True, electrode_assembly: "PyElectrodeAssembly" = None):
@@ -537,6 +635,13 @@ class Pusher:
         v_new : np.ndarray(3,)
             Updated velocity [m/s]
         """
+        if self.algorithm == 'boris_rel':
+            r_half = r + 0.5 * dt * v
+            ef = np.asarray(efield(r_half.reshape(1, 3))[0], dtype=float)
+            bf = np.asarray(bfield(r_half.reshape(1, 3))[0], dtype=float)
+            v_new = boris_rel_kick_single(np.asarray(v, dtype=float), ef, bf, float(dt), self.q_over_m)
+            return r_half + 0.5 * dt * v_new, v_new
+
         # Query fields at current position
         ef = efield(r.reshape(1, 3))[0]
         bf = bfield(r.reshape(1, 3))[0]
@@ -728,9 +833,14 @@ Notes
         v_new_array : np.ndarray(M, 3)
             Updated velocities [m/s]
         """
-        # Query fields for all particles (batch query for parallelization)
-        efield_array = efield(r_array)
-        bfield_array = bfield(r_array)
+        # Query fields for all particles (batch query for parallelization). The RK4 algorithms evaluate the fields
+        # at their own stage points inside _rk4_step_batch and never read these two arrays, so for them the query
+        # is skipped (2026-09-15 audit: it was a fifth, discarded E and B evaluation per step, 20 % of the field cost).
+        if self.algorithm == 'boris_rel':
+            return self._boris_rel_step_batch(r_array, v_array, efield, bfield, dt)
+        if self.algorithm not in ('rk4', 'rk4_rel'):
+            efield_array = efield(r_array)
+            bfield_array = bfield(r_array)
 
         # Algorithm-specific integration
         if self.algorithm == 'leapfrog':
@@ -805,6 +915,35 @@ Notes
             raise ValueError(f"Algorithm '{self.algorithm}' not implemented")
 
         return r_new_array, v_new_array
+
+    def _boris_rel_step_batch(self, r_array: np.ndarray, v_array: np.ndarray,
+                              efield: Callable, bfield: Callable,
+                              dt) -> Tuple[np.ndarray, np.ndarray]:
+        """Synchronized relativistic Boris (drift-kick-drift), batch form.
+
+        r_half = r + v dt/2 -> E, B at r_half (the one field evaluation of the step, at the
+        step midpoint in time too when the caller froze a TimedField there) -> Boris kick of
+        u = gamma v over dt -> r_new = r_half + v_new dt/2. ``dt`` may be a per-particle array
+        (the RF backtracks push each crossing particle by its own negative dt).
+        """
+        r_array = np.ascontiguousarray(r_array, dtype=float)
+        v_array = np.ascontiguousarray(v_array, dtype=float)
+        M = r_array.shape[0]
+        if np.ndim(dt) == 0:
+            dt_array = np.full(M, float(dt))
+        else:
+            dt_array = np.ascontiguousarray(dt, dtype=float).reshape(M)
+        r_half = r_array + (0.5 * dt_array)[:, None] * v_array
+        ef = np.ascontiguousarray(efield(r_half), dtype=float).reshape(M, 3)
+        bf = np.ascontiguousarray(bfield(r_half), dtype=float).reshape(M, 3)
+        if self.use_numba:
+            r_new, v_new = boris_rel_dkd_batch(r_half, v_array, ef, bf, dt_array, self.q_over_m)
+        else:
+            v_new = np.empty_like(v_array)
+            for i in range(M):
+                v_new[i] = boris_rel_kick_single(v_array[i], ef[i], bf[i], dt_array[i], self.q_over_m)
+            r_new = r_half + (0.5 * dt_array)[:, None] * v_new
+        return r_new, v_new
 
     def _rk4_step_batch(self, r_array: np.ndarray, v_array: np.ndarray,
                         efield: Callable, bfield: Callable,
