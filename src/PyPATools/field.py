@@ -9,7 +9,7 @@ Author: Refactored for PyPATools cyclotron design suite
 
 import numpy as np
 from .field_src.field_loaders import (load_aima_agora, load_comsol, load_h5part,
-                                      load_opal_midplane, load_opera_table)
+                                      load_opal_midplane, load_opera_table, load_vtu)
 from .field_src.field_writers import write_comsol
 import h5py
 import pickle
@@ -355,6 +355,10 @@ class Field(FieldBase):
             _data = field._load_opal_midplane(filename, **kwargs)
         elif ext == ".map":
             _data = field._load_aima_agora(filename, **kwargs)
+        elif ext == ".vtu":
+            # COMSOL VTK unstructured export of a regular-grid map (2026-09-15); loader kwargs:
+            # array=<name>, negate=True (pre-BCS coil direction -> BCS convention), res=<m> for a volume mesh
+            _data = load_vtu(filename, **{k: v for k, v in kwargs.items() if k in ("array", "negate", "res")})
         else:
             raise ValueError(f"Unknown file extension: {ext}")
 

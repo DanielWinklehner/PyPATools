@@ -1165,6 +1165,181 @@ def load_h5part(filename):
 # UNIT TESTS
 # ============================================================================
 
+def load_vtu(filename, array=None, negate=False, res=None):
+    """
+    Load a COMSOL VTK unstructured-grid export (.vtu) of a field on a regular grid.
+
+    COMSOL writes a regular-grid export as a point cloud (one vertex cell per
+    node) when the text export does not fit in memory (2026-09-15: the uncut
+    HiCoil centre-bore map, 40.9 M nodes, exported from the laptop). The points
+    are placed on the regular grid they came from (no interpolation); a genuine
+    volume mesh (tetra/hexa cells) is probed on a regular box of spacing ``res``
+    with vtkProbeFilter instead. If VTK's XML reader refuses the file, the
+    streaming text parser ``_read_vtu_ascii`` is used (COMSOL's ASCII .vtu
+    files can carry DataArray elements VTK considers malformed).
+
+    The field is one 3-component point array, or three 1-component arrays taken
+    in file order as (x, y, z). ``negate`` flips every component (a pre-BCS
+    export with the coil current reversed becomes the BCS convention).
+
+    Returns the same dict as load_comsol: 'grid' (1D x, y, z in m), 'values'
+    (x, y, z arrays shaped (nx, ny, nz) in T), 'dim', 'field_type', 'metadata'.
+    """
+    if not os.path.exists(filename):
+        raise FileNotFoundError(f"File not found: {filename}")
+    pts, raw, names, comps, point_cloud, layout = _read_vtu(filename, array=array, res=res)
+    coords = {c: np.unique(np.round(pts[:, i], 7)) for i, c in enumerate("xyz")}
+    nx, ny, nz = (len(coords[c]) for c in "xyz")
+    if not (point_cloud and nx * ny * nz == len(pts)):
+        raise ValueError(f"{filename}: {len(pts)} points do not form a full regular grid "
+                         f"({nx} x {ny} x {nz}); a volume mesh needs res=<m> (probe path)")
+    for c in "xyz":
+        d = np.diff(coords[c])
+        if len(d) and not np.allclose(d, d[0], atol=1e-7):
+            raise ValueError(f"{c} spacing of the .vtu point cloud is not uniform")
+    x, y, z = coords["x"], coords["y"], coords["z"]
+    hx, hy, hz = (float(v[1] - v[0]) if len(v) > 1 else 1.0 for v in (x, y, z))
+    i = np.rint((pts[:, 0] - x[0]) / hx).astype(int)
+    j = np.rint((pts[:, 1] - y[0]) / hy).astype(int)
+    k = np.rint((pts[:, 2] - z[0]) / hz).astype(int)
+    vals = np.full((nx, ny, nz, 3), np.nan)
+    vals[i, j, k] = raw
+    if not np.isfinite(vals).all():
+        raise ValueError("the .vtu point cloud does not fill its regular grid")
+    if negate:
+        vals = -vals
+    return {
+        'grid': {'x': x, 'y': y, 'z': z},
+        'values': {'x': np.ascontiguousarray(vals[..., 0]), 'y': np.ascontiguousarray(vals[..., 1]),
+                   'z': np.ascontiguousarray(vals[..., 2])},
+        'dim': 3,
+        'field_type': 'magnetic',
+        'metadata': {'units_original': {'length': 'm', 'field': 'T'}, 'array_length': int(len(pts)),
+                     'spatial_dims': ['x', 'y', 'z'], 'source': os.path.basename(filename),
+                     'negated': bool(negate), 'arrays': list(zip(names, comps)), 'layout': layout},
+    }
+
+
+def _read_vtu(filename, array=None, res=None):
+    """Points (N, 3), field (N, 3), array names/components, point-cloud flag, layout note. VTK reader first, the
+    streaming ASCII parser as the fallback; a volume mesh is probed on a regular box (spacing ``res``)."""
+    try:
+        import vtk
+        from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
+        reader = vtk.vtkXMLUnstructuredGridReader()
+        reader.SetFileName(filename)
+        reader.Update()
+        grid = reader.GetOutput()
+        if grid.GetNumberOfPoints() == 0:
+            raise ValueError("VTK read 0 points")
+        pts = vtk_to_numpy(grid.GetPoints().GetData()).astype(np.float64)
+        pd = grid.GetPointData()
+        names = [pd.GetArray(i).GetName() for i in range(pd.GetNumberOfArrays())]
+        comps = [pd.GetArray(i).GetNumberOfComponents() for i in range(pd.GetNumberOfArrays())]
+        if array is not None:
+            raw = vtk_to_numpy(pd.GetArray(array)).astype(np.float64)
+        elif 3 in comps:
+            raw = vtk_to_numpy(pd.GetArray(names[comps.index(3)])).astype(np.float64)
+        elif comps.count(1) >= 3:
+            one = [n for n, c in zip(names, comps) if c == 1][:3]
+            raw = np.column_stack([vtk_to_numpy(pd.GetArray(n)).astype(np.float64) for n in one])
+        else:
+            raise ValueError(f"cannot identify three field components: arrays {list(zip(names, comps))}")
+        cell_types = vtk_to_numpy(grid.GetCellTypesArray()) if grid.GetNumberOfCells() else np.array([])
+        point_cloud = len(cell_types) == 0 or bool(np.all(cell_types == 1))
+        if not point_cloud:
+            if res is None:
+                raise ValueError("a volume mesh needs res=<spacing in m> to be probed on a regular box")
+            lo, hi = pts.min(axis=0), pts.max(axis=0)
+            axes = [np.arange(lo[i], hi[i] + 0.5 * res, res) for i in range(3)]
+            img = vtk.vtkImageData()
+            img.SetDimensions(*(len(v) for v in axes))
+            img.SetOrigin(*(float(v[0]) for v in axes))
+            img.SetSpacing(res, res, res)
+            arr = numpy_to_vtk(raw, deep=True)
+            arr.SetName("B3")
+            grid.GetPointData().AddArray(arr)
+            probe = vtk.vtkProbeFilter()
+            probe.SetInputData(img)
+            probe.SetSourceData(grid)
+            probe.Update()
+            out = probe.GetOutput()
+            b = vtk_to_numpy(out.GetPointData().GetArray("B3")).astype(np.float64)
+            valid = vtk_to_numpy(out.GetPointData().GetArray("vtkValidPointMask")).astype(bool)
+            b[~valid] = np.nan
+            gx, gy, gz = np.meshgrid(*axes, indexing="ij")
+            pts = np.column_stack([gx.ravel(order="F"), gy.ravel(order="F"), gz.ravel(order="F")])  # VTK image order, x fastest
+            return pts, b, names, comps, True, f"volume mesh probed at {res} m"
+        if raw.ndim != 2 or raw.shape[1] != 3:
+            raise ValueError(f"field array of shape {raw.shape}: expected (N, 3)")
+        return pts, raw, names, comps, point_cloud, "point cloud on its grid (VTK reader)"
+    except Exception as exc:                       # VTK refuses COMSOL's ASCII files at times: stream the XML
+        pts, arrays = _read_vtu_ascii(filename)
+        names = [n for n, _ in arrays]
+        comps = [a.shape[1] if a.ndim == 2 else 1 for _, a in arrays]
+        if array is not None:
+            raw = dict(arrays)[array]
+        elif 3 in comps:
+            raw = arrays[comps.index(3)][1]
+        elif comps.count(1) >= 3:
+            raw = np.column_stack([a for _, a in arrays if a.ndim == 1][:3])
+        else:
+            raise ValueError(f"cannot identify three field components in {filename}: arrays {list(zip(names, comps))} "
+                             f"(VTK reader said: {exc})")
+        if raw.ndim != 2 or raw.shape[1] != 3:
+            raise ValueError(f"field array of shape {raw.shape} in {filename}: expected (N, 3)")
+        return pts, np.asarray(raw, dtype=np.float64), names, comps, True, f"point cloud on its grid (ASCII stream; VTK reader: {exc})"
+
+
+def _read_vtu_ascii(filename):
+    """Stream an ASCII VTK XML unstructured grid: returns (points (N, 3), [(name, values), ...]) for the Points array
+    and every PointData DataArray (values reshaped to (N, NumberOfComponents) when > 1). Cells are skipped."""
+    import re
+    tag_re = re.compile(r'<DataArray([^>]*)>')
+    attr_re = re.compile(r'(\w+)="([^"]*)"')
+    section = None
+    cur = None
+    chunks = []
+    points = None
+    arrays = []
+    with open(filename, 'r', buffering=1 << 24) as f:
+        for line in f:
+            s = line.strip()
+            if s.startswith('<'):
+                if s.startswith('<Points'):
+                    section = 'points'
+                elif s.startswith('<PointData'):
+                    section = 'pointdata'
+                elif s.startswith('<Cells') or s.startswith('<CellData'):
+                    section = 'skip'
+                elif s.startswith('</Points') or s.startswith('</PointData') or s.startswith('</Cells') or s.startswith('</CellData'):
+                    section = None
+                elif s.startswith('<DataArray') and section in ('points', 'pointdata'):
+                    attrs = dict(attr_re.findall(tag_re.match(s).group(1)))
+                    cur = (attrs, section)
+                    chunks = []
+                    rest = s[tag_re.match(s).end():]
+                    if rest and not rest.startswith('<'):
+                        chunks.append(np.fromstring(rest.split('<')[0], sep=' '))
+                elif s.startswith('</DataArray>') and cur is not None:
+                    attrs, sec = cur
+                    vals = np.concatenate(chunks) if chunks else np.zeros(0)
+                    nc = int(attrs.get('NumberOfComponents', 1))
+                    if nc > 1:
+                        vals = vals.reshape(-1, nc)
+                    if sec == 'points':
+                        points = vals.reshape(-1, 3) if vals.ndim == 1 else vals
+                    else:
+                        arrays.append((attrs.get('Name', f'array{len(arrays)}'), vals))
+                    cur = None
+                continue
+            if cur is not None:
+                chunks.append(np.fromstring(s, sep=' '))
+    if points is None:
+        raise ValueError(f"no <Points> DataArray in {filename}")
+    return points, arrays
+
+
 def test_load_opera_table():
     """Test OPERA table loader with synthetic data."""
     import tempfile
